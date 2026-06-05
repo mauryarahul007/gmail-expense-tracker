@@ -266,9 +266,12 @@ export default function App() {
 
   // Hardcode exchange rate for presentation purposes: 1 USD = 83 INR
   const getAmountInINR = (exp) => {
-    if (exp.currency === 'INR') return exp.amount;
-    if (exp.currency === 'USD') return exp.amount * 83;
-    return exp.amount;
+    if (!exp) return 0;
+    const amount = typeof exp.amount === 'number' ? exp.amount : 0;
+    const currency = exp.currency || 'INR';
+    if (currency === 'INR') return amount;
+    if (currency === 'USD') return amount * 83;
+    return amount;
   };
 
   const formatCurrency = (val) => {
@@ -281,22 +284,35 @@ export default function App() {
 
   // Get months list available in data
   const months = ['All', ...new Set(expenses.map(e => {
+    if (!e || !e.date) return 'Unknown Month';
     const d = new Date(e.date);
-    return d.toLocaleString('default', { month: 'long', year: 'numeric' });
-  }))];
+    if (isNaN(d.getTime())) return 'Unknown Month';
+    return d.toLocaleString('en-US', { month: 'long', year: 'numeric' }); // explicitly en-US for consistent parsing/filtering
+  }))].filter(m => m !== 'Unknown Month');
 
   // Apply filters to dataset
   const filteredExpenses = expenses.filter(e => {
-    const matchCategory = filterCategory === 'All' || e.category === filterCategory;
+    if (!e) return false;
+    const category = e.category || 'Other';
+    const matchCategory = filterCategory === 'All' || category === filterCategory;
     
-    const d = new Date(e.date);
-    const mStr = d.toLocaleString('default', { month: 'long', year: 'numeric' });
+    let mStr = 'Unknown Month';
+    if (e.date) {
+      const d = new Date(e.date);
+      if (!isNaN(d.getTime())) {
+        mStr = d.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+      }
+    }
     const matchMonth = filterMonth === 'All' || mStr === filterMonth;
 
+    const merchant = e.merchant || 'Unknown Merchant';
+    const subject = e.subject || '';
+    const snippet = e.snippet || '';
+
     const query = searchQuery.toLowerCase();
-    const matchSearch = e.merchant.toLowerCase().includes(query) || 
-                        e.subject.toLowerCase().includes(query) || 
-                        e.snippet.toLowerCase().includes(query);
+    const matchSearch = merchant.toLowerCase().includes(query) || 
+                        subject.toLowerCase().includes(query) || 
+                        snippet.toLowerCase().includes(query);
 
     return matchCategory && matchMonth && matchSearch;
   });
@@ -310,8 +326,10 @@ export default function App() {
 
   // Calculate category totals
   const categoryData = filteredExpenses.reduce((acc, e) => {
+    if (!e) return acc;
+    const category = e.category || 'Other';
     const inrVal = getAmountInINR(e);
-    acc[e.category] = (acc[e.category] || 0) + inrVal;
+    acc[category] = (acc[category] || 0) + inrVal;
     return acc;
   }, {});
 
@@ -323,8 +341,12 @@ export default function App() {
 
   // Calculate monthly trend data (for the bar chart - last 6 months or whatever exists in filtered data)
   const monthlyTotalsMap = expenses.reduce((acc, e) => {
+    if (!e || !e.date) return acc;
     const d = new Date(e.date);
-    const key = d.toLocaleString('default', { month: 'short', year: '2-digit' });
+    if (isNaN(d.getTime())) return acc;
+    const year = d.getFullYear();
+    const month = d.getMonth(); // 0-11
+    const key = `${year}-${String(month + 1).padStart(2, '0')}`; // "2026-05"
     const inrVal = getAmountInINR(e);
     acc[key] = (acc[key] || 0) + inrVal;
     return acc;
@@ -332,15 +354,13 @@ export default function App() {
 
   // Get sorted unique months from data (limit to last 6)
   const monthlyTrendData = Object.entries(monthlyTotalsMap)
-    .map(([label, total]) => ({ label, total }))
-    // Sort chronologically (rough check using date parsing)
-    .sort((a, b) => {
-      const parseDate = (lbl) => {
-        const [m, y] = lbl.split(' ');
-        return new Date(`${m} 20${y}`);
-      };
-      return parseDate(a.label) - parseDate(b.label);
+    .map(([key, total]) => {
+      const [year, monthStr] = key.split('-');
+      const d = new Date(parseInt(year), parseInt(monthStr) - 1, 1);
+      const label = d.toLocaleString('en-US', { month: 'short' }) + ' ' + year.substring(2);
+      return { key, label, total };
     })
+    .sort((a, b) => a.key.localeCompare(b.key))
     .slice(-6);
 
   const maxMonthlyVal = Math.max(...monthlyTrendData.map(m => m.total), 1000);
@@ -633,36 +653,48 @@ export default function App() {
                   </thead>
                   <tbody>
                     {filteredExpenses.map((exp) => {
-                      const tagClass = exp.category.toLowerCase().replace(/[^a-z0-9]/g, '');
+                      if (!exp) return null;
+                      const category = exp.category || 'Other';
+                      const tagClass = category.toLowerCase().replace(/[^a-z0-9]/g, '');
                       
-                      const dateObj = new Date(exp.date);
-                      const displayDate = dateObj.toLocaleDateString('en-IN', {
-                        day: '2-digit',
-                        month: 'short',
-                        year: 'numeric'
-                      });
+                      let displayDate = 'Unknown Date';
+                      if (exp.date) {
+                        const dateObj = new Date(exp.date);
+                        if (!isNaN(dateObj.getTime())) {
+                          displayDate = dateObj.toLocaleDateString('en-IN', {
+                            day: '2-digit',
+                            month: 'short',
+                            year: 'numeric'
+                          });
+                        }
+                      }
+
+                      const merchant = exp.merchant || 'Unknown Merchant';
+                      const subject = exp.subject || '';
+                      const amount = typeof exp.amount === 'number' ? exp.amount : 0;
+                      const currency = exp.currency || 'INR';
 
                       return (
                         <tr key={exp.id} onClick={() => setSelectedExpense(exp)}>
                           <td>
                             <div className="merchant-cell">
                               <div className="merchant-avatar">
-                                {exp.merchant.charAt(0).toUpperCase()}
+                                {merchant.charAt(0).toUpperCase()}
                               </div>
-                              {exp.merchant}
+                              {merchant}
                             </div>
                           </td>
                           <td style={{ color: 'var(--text-secondary)', maxWidth: '350px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {exp.subject}
+                            {subject}
                           </td>
                           <td style={{ color: 'var(--text-muted)' }}>{displayDate}</td>
                           <td>
                             <span className={`category-tag ${tagClass}`}>
-                              {exp.category}
+                              {category}
                             </span>
                           </td>
-                          <td className={`amount-text ${exp.currency.toLowerCase()}`}>
-                            {exp.currency === 'USD' ? '$' : '₹'}{exp.amount.toFixed(2)}
+                          <td className={`amount-text ${currency.toLowerCase()}`}>
+                            {currency === 'USD' ? '$' : '₹'}{amount.toFixed(2)}
                           </td>
                         </tr>
                       );
@@ -696,14 +728,14 @@ export default function App() {
             <div className="modal-body">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
                 <div>
-                  <h4 style={{ fontSize: '24px', fontWeight: 700 }}>{selectedExpense.merchant}</h4>
+                  <h4 style={{ fontSize: '24px', fontWeight: 700 }}>{selectedExpense.merchant || 'Unknown Merchant'}</h4>
                   <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginTop: '4px' }}>
-                    Date: {new Date(selectedExpense.date).toLocaleString()}
+                    Date: {selectedExpense.date ? new Date(selectedExpense.date).toLocaleString() : 'Unknown Date'}
                   </p>
                 </div>
                 <div style={{ textAlign: 'right' }}>
                   <div style={{ fontSize: '28px', fontWeight: 800, color: selectedExpense.currency === 'USD' ? 'var(--blue)' : 'var(--text-primary)' }}>
-                    {selectedExpense.currency === 'USD' ? '$' : '₹'}{selectedExpense.amount.toFixed(2)}
+                    {selectedExpense.currency === 'USD' ? '$' : '₹'}{(selectedExpense.amount || 0).toFixed(2)}
                   </div>
                   {selectedExpense.currency === 'USD' && (
                     <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
@@ -737,8 +769,8 @@ export default function App() {
                     </select>
                   ) : (
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '6px' }}>
-                      <span className={`category-tag ${selectedExpense.category.toLowerCase().replace(/[^a-z0-9]/g, '')}`}>
-                        {selectedExpense.category}
+                      <span className={`category-tag ${(selectedExpense.category || 'Other').toLowerCase().replace(/[^a-z0-9]/g, '')}`}>
+                        {selectedExpense.category || 'Other'}
                       </span>
                       {dataSource === 'live' && (
                         <button className="btn btn-secondary" style={{ padding: '4px 8px', fontSize: '11px' }} onClick={() => setEditingExpense(selectedExpense.id)}>
