@@ -450,6 +450,7 @@ a:hover {
 .category-dot.shopping { background-color: var(--blue); }
 .category-dot.subscriptionsentertainment { background-color: var(--red); }
 .category-dot.utilitiesbills { background-color: #f97316; }
+.category-dot.rent { background-color: #ec4899; }
 .category-dot.other { background-color: var(--text-secondary); }
 
 .category-name {
@@ -500,6 +501,7 @@ a:hover {
 .category-progress-fill.shopping { background-color: var(--blue); }
 .category-progress-fill.subscriptionsentertainment { background-color: var(--red); }
 .category-progress-fill.utilitiesbills { background-color: #f97316; }
+.category-progress-fill.rent { background-color: #ec4899; }
 .category-progress-fill.other { background-color: var(--text-secondary); }
 
 /* Filters & Table Area */
@@ -652,6 +654,7 @@ a:hover {
 .category-tag.shopping { background: rgba(96, 165, 250, 0.12); color: var(--blue); }
 .category-tag.subscriptionsentertainment { background: rgba(248, 113, 113, 0.12); color: var(--red); }
 .category-tag.utilitiesbills { background: rgba(249, 115, 22, 0.12); color: #f97316; }
+.category-tag.rent { background: rgba(236, 72, 153, 0.12); color: #ec4899; }
 .category-tag.other { background: rgba(148, 163, 184, 0.12); color: var(--text-secondary); }
 
 .amount-text {

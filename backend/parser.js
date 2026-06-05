@@ -11,7 +11,8 @@ const MERCHANT_RULES = [
   { keywords: ['uber', 'ola', 'taxi', 'irctc', 'indigo', 'makemytrip', 'airlines', 'railway', 'flight'], category: 'Travel & Commute' },
   { keywords: ['amazon', 'flipkart', 'walmart', 'target', 'myntra', 'ajio', 'nykaa', 'tata cliq', 'shopify'], category: 'Shopping' },
   { keywords: ['netflix', 'spotify', 'steam', 'youtube premium', 'apple.com/bill', 'itunes', 'disney', 'hotstar'], category: 'Subscriptions & Entertainment' },
-  { keywords: ['electricity', 'bescom', 'recharge', 'jio', 'airtel', 'act fibernet', 'comcast', 'verizon', 'att', 'telecom', 'gas', 'water'], category: 'Utilities & Bills' }
+  { keywords: ['electricity', 'bescom', 'recharge', 'jio', 'airtel', 'act fibernet', 'comcast', 'verizon', 'att', 'telecom', 'gas', 'water'], category: 'Utilities & Bills' },
+  { keywords: ['rent', 'houserent', 'house rent', 'landlord'], category: 'Rent' }
 ];
 
 /**
@@ -25,6 +26,7 @@ function normalizeMerchant(text, fromEmail = '') {
   if (normalizedText.includes('nps') || normalizedText.includes('national pension')) return 'NPS';
   if (normalizedText.includes('ppf') || normalizedText.includes('public provident')) return 'PPF';
   if (normalizedText.includes('coin')) return 'Coin';
+  if (normalizedText.includes('rent') || normalizedText.includes('landlord')) return 'Rent';
 
   // Try to find a matched rule
   for (const rule of MERCHANT_RULES) {
@@ -71,6 +73,12 @@ function getCategoryByContent(subject, snippet, body, merchantName) {
   const investmentKeywords = ['groww', 'zerodha', 'mutual fund', 'mutualfund', 'sip', 'smallcase', 'coin by', 'coin', 'wazirx', 'investment', 'invested', 'securities', 'indmoney', 'axis direct', 'hsb mutual', 'demat', 'stocks', 'ipo fund', 'etmoney', 'nps', 'ppf', 'national pension', 'public provident', 'provident fund', 'nps contribution', 'ppf contribution'];
   if (investmentKeywords.some(kw => fullText.includes(kw) || merchantLower.includes(kw))) {
     return 'Investment';
+  }
+
+  // 1.5 Rent
+  const rentKeywords = ['rent', 'houserent', 'house rent', 'landlord', 'rent payment', 'rent paid'];
+  if (rentKeywords.some(kw => fullText.includes(kw) || merchantLower.includes(kw))) {
+    return 'Rent';
   }
 
   // 2. Credit Card
