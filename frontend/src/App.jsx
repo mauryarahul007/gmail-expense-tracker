@@ -156,7 +156,7 @@ export default function App() {
       const res = await fetch(`${BACKEND_URL}/api/sync`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ limit: 100 })
+        body: JSON.stringify({ limit: 1000 })
       });
       const data = await res.json();
       if (data.success) {

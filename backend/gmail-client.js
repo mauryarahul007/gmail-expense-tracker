@@ -227,14 +227,32 @@ async function fetchTransactionEmails(query = '', maxResults = 500) {
   
   console.log(`Searching Gmail with query: "${finalQuery}"`);
   
-  const response = await gmail.users.messages.list({
-    userId: 'me',
-    q: finalQuery,
-    maxResults
-  });
+  let messages = [];
+  let pageToken = null;
+  
+  try {
+    do {
+      const response = await gmail.users.messages.list({
+        userId: 'me',
+        q: finalQuery,
+        maxResults: Math.min(100, maxResults - messages.length),
+        pageToken
+      });
+      
+      const pageMessages = response.data.messages || [];
+      messages = messages.concat(pageMessages);
+      pageToken = response.data.nextPageToken;
+      
+      if (messages.length >= maxResults || !pageToken) {
+        break;
+      }
+    } while (pageToken);
+  } catch (err) {
+    console.error('Error listing Gmail messages:', err.message);
+    throw err;
+  }
 
-  const messages = response.data.messages || [];
-  console.log(`Found ${messages.length} messages matching query.`);
+  console.log(`Found ${messages.length} total messages matching query.`);
 
   const parsedEmails = [];
   
