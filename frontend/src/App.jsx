@@ -42,6 +42,9 @@ export default function App() {
   const [filterMonth, setFilterMonth] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Active Analytics Tab
+  const [activeAnalyticsTab, setActiveAnalyticsTab] = useState('split');
+
   // Manual upload form
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [rawSubject, setRawSubject] = useState('');
@@ -443,6 +446,128 @@ export default function App() {
 
   const maxMonthlyVal = Math.max(...monthlyTrendData.map(m => m.total), 1000);
 
+  // --- Advanced Analytics Calculations ---
+  // 1. Fixed vs Discretionary Split
+  const FIXED_CATEGORIES = ['Rent', 'Investment', 'Subscriptions & Entertainment', 'Utilities & Bills', 'Credit Card'];
+  let fixedSpend = 0;
+  let discretionarySpend = 0;
+  filteredExpenses.forEach(e => {
+    const amount = getAmountInINR(e);
+    if (FIXED_CATEGORIES.includes(e.category)) {
+      fixedSpend += amount;
+    } else {
+      discretionarySpend += amount;
+    }
+  });
+  const totalSplitSpend = fixedSpend + discretionarySpend;
+  const fixedPercentage = totalSplitSpend > 0 ? Math.round((fixedSpend / totalSplitSpend) * 100) : 0;
+  const discretionaryPercentage = totalSplitSpend > 0 ? Math.round((discretionarySpend / totalSplitSpend) * 100) : 0;
+
+  // 2. Top Merchants Bubble Chart
+  const merchantTotals = filteredExpenses.reduce((acc, e) => {
+    if (!e) return acc;
+    const name = e.merchant || 'Unknown Merchant';
+    const inrVal = getAmountInINR(e);
+    if (!acc[name]) {
+      acc[name] = { name, amount: 0, count: 0 };
+    }
+    acc[name].amount += inrVal;
+    acc[name].count += 1;
+    return acc;
+  }, {});
+  const topMerchants = Object.values(merchantTotals)
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, 6);
+  const maxMerchantAmount = topMerchants.length > 0 ? topMerchants[0].amount : 1;
+
+  // 3. Day of Week Spending Heatmap
+  const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const dayOfWeekSpends = Array(7).fill(0).map((_, idx) => ({ dayName: DAY_NAMES[idx], total: 0, count: 0 }));
+  filteredExpenses.forEach(e => {
+    if (!e || !e.date) return;
+    const d = new Date(e.date);
+    if (isNaN(d.getTime())) return;
+    const dayIdx = d.getDay();
+    const val = getAmountInINR(e);
+    dayOfWeekSpends[dayIdx].total += val;
+    dayOfWeekSpends[dayIdx].count += 1;
+  });
+  const maxDaySpend = Math.max(...dayOfWeekSpends.map(d => d.total), 1);
+
+  // 4. Subscription & Billing Calendar (scan entire expenses database for regular recurring entries)
+  const RECURRING_CATEGORIES = ['Rent', 'Subscriptions & Entertainment', 'Utilities & Bills'];
+  const recurringMap = expenses.reduce((acc, e) => {
+    if (!e || !RECURRING_CATEGORIES.includes(e.category)) return acc;
+    const merchant = e.merchant || 'Unknown';
+    if (!acc[merchant]) {
+      acc[merchant] = {
+        merchant,
+        category: e.category,
+        amount: getAmountInINR(e),
+        dates: [],
+        latestDate: new Date(e.date)
+      };
+    }
+    acc[merchant].dates.push(new Date(e.date));
+    if (new Date(e.date) > acc[merchant].latestDate) {
+      acc[merchant].latestDate = new Date(e.date);
+      acc[merchant].amount = getAmountInINR(e);
+    }
+    return acc;
+  }, {});
+
+  const billingCalendar = Object.values(recurringMap).map(item => {
+    const billingDay = item.latestDate.getDate();
+    const today = new Date();
+    const currentYear = today.getFullYear();
+    const currentMonth = today.getMonth();
+    
+    let targetDate = new Date(currentYear, currentMonth, billingDay);
+    if (targetDate < today) {
+      targetDate = new Date(currentYear, currentMonth + 1, billingDay);
+    }
+    
+    const diffTime = Math.abs(targetDate - today);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    return {
+      ...item,
+      billingDay,
+      daysRemaining: diffDays,
+      targetDate
+    };
+  }).sort((a, b) => a.daysRemaining - b.daysRemaining);
+
+  // 5. MoM Stacked Trends (comparing category shares across top 6 months)
+  const trendMonths = monthlyTrendData.map(m => m.key);
+  const categoryTrendData = trendMonths.map(mKey => {
+    const monthExpenses = expenses.filter(e => {
+      if (!e || !e.date) return false;
+      const d = new Date(e.date);
+      if (isNaN(d.getTime())) return false;
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      return key === mKey;
+    });
+    
+    const totals = { Rent: 0, Investment: 0, Food: 0, Shopping: 0, Other: 0 };
+    monthExpenses.forEach(e => {
+      const amount = getAmountInINR(e);
+      if (e.category === 'Rent') totals.Rent += amount;
+      else if (e.category === 'Investment') totals.Investment += amount;
+      else if (e.category === 'Food Delivery' || e.category === 'Dining Out') totals.Food += amount;
+      else if (e.category === 'Shopping') totals.Shopping += amount;
+      else totals.Other += amount;
+    });
+    
+    const totalMonthSpend = Object.values(totals).reduce((sum, v) => sum + v, 0);
+    return {
+      monthKey: mKey,
+      label: new Date(parseInt(mKey.split('-')[0]), parseInt(mKey.split('-')[1]) - 1, 1).toLocaleString('en-US', { month: 'short' }) + ' ' + mKey.split('-')[0].substring(2),
+      totals,
+      totalMonthSpend
+    };
+  });
+
   return (
     <>
       {/* Navbar */}
@@ -594,6 +719,322 @@ export default function App() {
               <span className="metric-subtext">
                 {dataSource === 'demo' ? 'Mock Data Active' : (authStatus.isAuthenticated ? 'Authenticated & Ready' : 'OAuth Credentials Needed')}
               </span>
+            </div>
+          </div>
+
+          {/* Analytics & Insights Section */}
+          <div className="panel-card" style={{ marginBottom: '32px' }}>
+            <div className="panel-header" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '16px', marginBottom: '20px', display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: '16px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3 className="panel-title">📊 Analytics & Financial Insights</h3>
+                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Interactive Infographics</span>
+              </div>
+              
+              {/* Tabs navigation */}
+              <div className="analytics-tabs-container" style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '8px' }}>
+                <button 
+                  type="button"
+                  className={`analytics-tab ${activeAnalyticsTab === 'split' ? 'active' : ''}`}
+                  onClick={() => setActiveAnalyticsTab('split')}
+                >
+                  🍩 Fixed vs. Discretionary
+                </button>
+                <button 
+                  type="button"
+                  className={`analytics-tab ${activeAnalyticsTab === 'merchants' ? 'active' : ''}`}
+                  onClick={() => setActiveAnalyticsTab('merchants')}
+                >
+                  🫧 Top Merchants
+                </button>
+                <button 
+                  type="button"
+                  className={`analytics-tab ${activeAnalyticsTab === 'heatmap' ? 'active' : ''}`}
+                  onClick={() => setActiveAnalyticsTab('heatmap')}
+                >
+                  📅 Day-of-Week Heatmap
+                </button>
+                <button 
+                  type="button"
+                  className={`analytics-tab ${activeAnalyticsTab === 'calendar' ? 'active' : ''}`}
+                  onClick={() => setActiveAnalyticsTab('calendar')}
+                >
+                  🔔 Billing Calendar
+                </button>
+                <button 
+                  type="button"
+                  className={`analytics-tab ${activeAnalyticsTab === 'trends' ? 'active' : ''}`}
+                  onClick={() => setActiveAnalyticsTab('trends')}
+                >
+                  📈 Stacked Category Trend
+                </button>
+              </div>
+            </div>
+
+            {/* TAB CONTENTS */}
+            <div className="analytics-tab-content" style={{ minHeight: '220px' }}>
+              
+              {/* Tab 1: Fixed vs. Discretionary Donut Chart */}
+              {activeAnalyticsTab === 'split' && (
+                <div className="analytics-split-layout">
+                  {totalSplitSpend === 0 ? (
+                    <div className="empty-state">No transaction data available for this view.</div>
+                  ) : (
+                    <>
+                      {/* SVG Donut */}
+                      <div className="donut-chart-container">
+                        <svg width="180" height="180" viewBox="0 0 180 180" className="donut-svg">
+                          {/* Discretionary segment (base background/first segment) */}
+                          <circle 
+                            cx="90" 
+                            cy="90" 
+                            r="70" 
+                            fill="transparent" 
+                            stroke="rgba(96, 165, 250, 0.15)" 
+                            strokeWidth="20"
+                          />
+                          {/* Discretionary active track */}
+                          <circle 
+                            cx="90" 
+                            cy="90" 
+                            r="70" 
+                            fill="transparent" 
+                            stroke="var(--blue)" 
+                            strokeWidth="20"
+                            strokeDasharray={`${2 * Math.PI * 70}`}
+                            strokeDashoffset={`${2 * Math.PI * 70 * (1 - discretionaryPercentage / 100)}`}
+                            strokeLinecap="round"
+                            transform="rotate(-90 90 90)"
+                            style={{ filter: 'drop-shadow(0 0 6px var(--blue-glow))', transition: 'stroke-dashoffset 0.8s ease' }}
+                          />
+                          {/* Fixed active track */}
+                          <circle 
+                            cx="90" 
+                            cy="90" 
+                            r="70" 
+                            fill="transparent" 
+                            stroke="var(--purple)" 
+                            strokeWidth="20"
+                            strokeDasharray={`${2 * Math.PI * 70}`}
+                            strokeDashoffset={`${2 * Math.PI * 70 * (1 - fixedPercentage / 100)}`}
+                            strokeLinecap="round"
+                            transform={`rotate(${(discretionaryPercentage / 100) * 360 - 90} 90 90)`}
+                            style={{ filter: 'drop-shadow(0 0 6px var(--purple-glow))', transition: 'stroke-dashoffset 0.8s ease' }}
+                          />
+                          {/* Center Text */}
+                          <text x="90" y="85" textAnchor="middle" dominantBaseline="middle" fill="var(--text-primary)" fontSize="18" fontWeight="800">
+                            {fixedPercentage}%
+                          </text>
+                          <text x="90" y="105" textAnchor="middle" dominantBaseline="middle" fill="var(--text-secondary)" fontSize="11" fontWeight="600" letterSpacing="0.5">
+                            FIXED
+                          </text>
+                        </svg>
+                      </div>
+
+                      {/* Legend Stats */}
+                      <div className="donut-legend-container">
+                        <div className="legend-item purple">
+                          <div className="legend-color-box" style={{ backgroundColor: 'var(--purple)', boxShadow: '0 0 10px var(--purple)' }}></div>
+                          <div className="legend-text-details">
+                            <span className="legend-label">Fixed Expenses & Savings</span>
+                            <h4 className="legend-value">{formatCurrency(fixedSpend)} <span className="legend-percentage">({fixedPercentage}%)</span></h4>
+                            <p className="legend-description">Rent, SIP Investments, Utility Bills, Cards & Subscriptions</p>
+                          </div>
+                        </div>
+
+                        <div className="legend-item blue" style={{ marginTop: '20px' }}>
+                          <div className="legend-color-box" style={{ backgroundColor: 'var(--blue)', boxShadow: '0 0 10px var(--blue)' }}></div>
+                          <div className="legend-text-details">
+                            <span className="legend-label">Discretionary Spend</span>
+                            <h4 className="legend-value">{formatCurrency(discretionarySpend)} <span className="legend-percentage">({discretionaryPercentage}%)</span></h4>
+                            <p className="legend-description">Food Delivery, Dining Out, Shopping, Commutes & UPI transfers</p>
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* Tab 2: Top Merchants Spend (Bubbles View) */}
+              {activeAnalyticsTab === 'merchants' && (
+                <div className="analytics-merchants-layout">
+                  {topMerchants.length === 0 ? (
+                    <div className="empty-state">No merchants found. Try syncing your Gmail inbox.</div>
+                  ) : (
+                    <div className="merchants-bubble-grid">
+                      {topMerchants.map((m, idx) => {
+                        const size = Math.max(100, Math.round(100 + (m.amount / maxMerchantAmount) * 60));
+                        const colors = [
+                          { bg: 'var(--purple-glow)', border: 'var(--purple)', color: 'var(--purple)' },
+                          { bg: 'var(--blue-glow)', border: 'var(--blue)', color: 'var(--blue)' },
+                          { bg: 'var(--green-glow)', border: 'var(--green)', color: 'var(--green)' },
+                          { bg: 'var(--orange-glow)', border: 'var(--orange)', color: 'var(--orange)' },
+                          { bg: 'rgba(236, 72, 153, 0.15)', border: '#ec4899', color: '#ec4899' },
+                          { bg: 'rgba(6, 182, 212, 0.15)', border: '#06b6d4', color: '#06b6d4' }
+                        ];
+                        const scheme = colors[idx % colors.length];
+
+                        return (
+                          <div 
+                            key={m.name} 
+                            className="merchant-bubble-card"
+                            style={{ 
+                              width: `${size}px`, 
+                              height: `${size}px`, 
+                              backgroundColor: scheme.bg, 
+                              borderColor: scheme.border,
+                              color: scheme.color,
+                              boxShadow: `0 0 15px ${scheme.bg}`
+                            }}
+                          >
+                            <div className="bubble-avatar">
+                              {m.name.charAt(0).toUpperCase()}
+                            </div>
+                            <span className="bubble-name">{m.name}</span>
+                            <span className="bubble-amount">{formatCurrency(m.amount)}</span>
+                            <span className="bubble-count">{m.count} tx</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Tab 3: Day-of-Week Spending Heatmap */}
+              {activeAnalyticsTab === 'heatmap' && (
+                <div className="analytics-heatmap-layout">
+                  <p className="helper-text" style={{ marginBottom: '16px', textAlign: 'center' }}>
+                    Visualizes aggregate outflow intensity based on the day of the week. Darker colors signify higher spending.
+                  </p>
+                  <div className="heatmap-row-container">
+                    {dayOfWeekSpends.map((day) => {
+                      const ratio = maxDaySpend > 0 ? day.total / maxDaySpend : 0;
+                      const opacity = Math.max(0.1, ratio);
+                      const bgStyle = {
+                        backgroundColor: `rgba(167, 139, 250, ${opacity})`,
+                        border: `1px solid rgba(167, 139, 250, ${opacity + 0.15})`,
+                        boxShadow: ratio > 0.5 ? `0 0 12px rgba(167, 139, 250, ${ratio * 0.3})` : 'none'
+                      };
+
+                      return (
+                        <div key={day.dayName} className="heatmap-day-column" style={bgStyle}>
+                          <span className="heatmap-day-name">{day.dayName.substring(0, 3)}</span>
+                          <span className="heatmap-day-value">{formatCurrency(day.total)}</span>
+                          <span className="heatmap-day-count">{day.count} payments</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Tab 4: Subscription & Billing Calendar */}
+              {activeAnalyticsTab === 'calendar' && (
+                <div className="analytics-calendar-layout">
+                  {billingCalendar.length === 0 ? (
+                    <div className="empty-state">No recurring subscriptions or bill alerts found in data.</div>
+                  ) : (
+                    <div className="calendar-timeline-grid">
+                      {billingCalendar.map((item) => {
+                        const tagClass = item.category.toLowerCase().replace(/[^a-z0-9]/g, '');
+                        let remainingColor = 'var(--text-secondary)';
+                        if (item.daysRemaining <= 3) remainingColor = 'var(--red)';
+                        else if (item.daysRemaining <= 7) remainingColor = 'var(--orange)';
+                        else remainingColor = 'var(--green)';
+
+                        return (
+                          <div key={item.merchant} className="calendar-bill-card">
+                            <div className="bill-header">
+                              <span className={`category-tag ${tagClass}`} style={{ fontSize: '10px' }}>
+                                {item.category}
+                              </span>
+                              <span className="bill-day-indicator">
+                                Monthly: **Day {item.billingDay}**
+                              </span>
+                            </div>
+
+                            <h4 className="bill-merchant">{item.merchant}</h4>
+                            <div className="bill-details">
+                              <span className="bill-amount">{formatCurrency(item.amount)}</span>
+                              <span className="bill-due-days" style={{ color: remainingColor, fontWeight: 700 }}>
+                                {item.daysRemaining === 0 ? 'Due Today' : `Due in ${item.daysRemaining} days`}
+                              </span>
+                            </div>
+                            
+                            <div className="bill-progress-track">
+                              <div 
+                                className="bill-progress-fill" 
+                                style={{ 
+                                  width: `${Math.max(5, Math.min(100, (30 - item.daysRemaining) / 30 * 100))}%`,
+                                  backgroundColor: remainingColor
+                                }}
+                              ></div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Tab 5: MoM Stacked Trends */}
+              {activeAnalyticsTab === 'trends' && (
+                <div className="analytics-trends-layout">
+                  {categoryTrendData.length === 0 ? (
+                    <div className="empty-state">No trend data available.</div>
+                  ) : (
+                    <div className="trends-chart-wrapper">
+                      <div className="trends-chart-legend" style={{ display: 'flex', justifyContent: 'center', gap: '16px', marginBottom: '24px', flexWrap: 'wrap' }}>
+                        <div className="legend-pill"><span className="legend-dot" style={{ backgroundColor: '#ec4899' }}></span> Rent</div>
+                        <div className="legend-pill"><span className="legend-dot" style={{ backgroundColor: '#eab308' }}></span> Investment</div>
+                        <div className="legend-pill"><span className="legend-dot" style={{ backgroundColor: '#10b981' }}></span> Food</div>
+                        <div className="legend-pill"><span className="legend-dot" style={{ backgroundColor: '#60a5fa' }}></span> Shopping</div>
+                        <div className="legend-pill"><span className="legend-dot" style={{ backgroundColor: 'var(--text-secondary)' }}></span> Other</div>
+                      </div>
+
+                      <div className="trends-bar-chart">
+                        {categoryTrendData.map((m) => {
+                          const maxTrendVal = Math.max(...categoryTrendData.map(item => item.totalMonthSpend), 1);
+                          const pctRent = m.totalMonthSpend > 0 ? (m.totals.Rent / m.totalMonthSpend) * 100 : 0;
+                          const pctInvest = m.totalMonthSpend > 0 ? (m.totals.Investment / m.totalMonthSpend) * 100 : 0;
+                          const pctFood = m.totalMonthSpend > 0 ? (m.totals.Food / m.totalMonthSpend) * 100 : 0;
+                          const pctShop = m.totalMonthSpend > 0 ? (m.totals.Shopping / m.totalMonthSpend) * 100 : 0;
+                          const pctOther = m.totalMonthSpend > 0 ? (m.totals.Other / m.totalMonthSpend) * 100 : 0;
+
+                          const heightRatio = (m.totalMonthSpend / maxTrendVal) * 85;
+
+                          return (
+                            <div key={m.monthKey} className="trend-bar-wrapper">
+                              <div className="trend-bar-fill-container" style={{ height: `${heightRatio}%` }}>
+                                <div className="trend-tooltip">
+                                  <strong>{m.label} Total: {formatCurrency(m.totalMonthSpend)}</strong>
+                                  <div style={{ fontSize: '10px', marginTop: '4px', textAlign: 'left' }}>
+                                    Rent: {formatCurrency(m.totals.Rent)}<br/>
+                                    Investments: {formatCurrency(m.totals.Investment)}<br/>
+                                    Food: {formatCurrency(m.totals.Food)}<br/>
+                                    Shopping: {formatCurrency(m.totals.Shopping)}<br/>
+                                    Other: {formatCurrency(m.totals.Other)}
+                                  </div>
+                                </div>
+                                
+                                {pctRent > 0 && <div className="trend-slice rent" style={{ height: `${pctRent}%`, backgroundColor: '#ec4899' }}></div>}
+                                {pctInvest > 0 && <div className="trend-slice invest" style={{ height: `${pctInvest}%`, backgroundColor: '#eab308' }}></div>}
+                                {pctFood > 0 && <div className="trend-slice food" style={{ height: `${pctFood}%`, backgroundColor: '#10b981' }}></div>}
+                                {pctShop > 0 && <div className="trend-slice shop" style={{ height: `${pctShop}%`, backgroundColor: '#60a5fa' }}></div>}
+                                {pctOther > 0 && <div className="trend-slice other" style={{ height: `${pctOther}%`, backgroundColor: 'var(--text-secondary)' }}></div>}
+                              </div>
+                              <div className="trend-bar-label">{m.label}</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
             </div>
           </div>
 
