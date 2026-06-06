@@ -223,7 +223,7 @@ async function fetchTransactionEmails(query = '', maxResults = 500) {
   const gmail = google.gmail({ version: 'v1', auth });
   
   // Default query targeting standard receipt keywords after Jan 1, 2026
-  const finalQuery = query || 'subject:(receipt OR order OR payment OR transaction OR invoice OR bill OR spent OR debited OR confirmed) after:2026/01/01';
+  const finalQuery = query || 'subject:(receipt OR order OR payment OR transaction OR invoice OR bill OR spent OR debited OR confirmed OR salary) after:2026/01/01';
   
   console.log(`Searching Gmail with query: "${finalQuery}"`);
   

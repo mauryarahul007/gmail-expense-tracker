@@ -2,6 +2,9 @@ import React, { useState, useEffect } from 'react';
 
 // Static mock expenses for high-fidelity out-of-the-box demo
 const DEMO_EXPENSES = [
+  { id: 'demo-salary-1', date: '2026-06-01T09:00:00.000Z', amount: 150000, currency: 'INR', merchant: 'Salary Payout', category: 'Salary', subject: 'Salary Credited for June 2026', snippet: 'Your account XX424 has been credited with INR 150,000.00 towards Salary.', from: 'alerts@hdfcbank.net', bodySummary: 'Dear Customer, your HDFC bank account XX424 has been credited with INR 150,000.00 towards Salary Payout on 01-06-2026.' },
+  { id: 'demo-salary-2', date: '2026-05-01T09:00:00.000Z', amount: 150000, currency: 'INR', merchant: 'Salary Payout', category: 'Salary', subject: 'Salary Credited for May 2026', snippet: 'Your account XX424 has been credited with INR 150,000.00 towards Salary.', from: 'alerts@hdfcbank.net', bodySummary: 'Dear Customer, your HDFC bank account XX424 has been credited with INR 150,000.00 towards Salary Payout on 01-05-2026.' },
+  { id: 'demo-salary-3', date: '2026-04-01T09:00:00.000Z', amount: 150000, currency: 'INR', merchant: 'Salary Payout', category: 'Salary', subject: 'Salary Credited for April 2026', snippet: 'Your account XX424 has been credited with INR 150,000.00 towards Salary.', from: 'alerts@hdfcbank.net', bodySummary: 'Dear Customer, your HDFC bank account XX424 has been credited with INR 150,000.00 towards Salary Payout on 01-04-2026.' },
   { id: 'demo-1', date: '2026-06-04T12:30:00.000Z', amount: 450, currency: 'INR', merchant: 'Zomato', category: 'Food Delivery', subject: 'Your Zomato order #92837198 was delivered', snippet: 'Thanks for ordering! You spent Rs. 450.00 on Butter Chicken & Naan.', from: 'noreply@zomato.com', bodySummary: 'Hi Rahul,\nYour order from "Delhi Darbar" has been delivered. Total paid: Rs. 450.00 via UPI.' },
   { id: 'demo-rent-1', date: '2026-06-01T10:00:00.000Z', amount: 24000, currency: 'INR', merchant: 'House Rent', category: 'Rent', subject: 'Rent Transfer Confirmed - Landlord', snippet: 'Rent payment of Rs. 24,000.00 transferred successfully to landlord bank account.', from: 'alerts@hdfcbank.net', bodySummary: 'Dear Customer, your HDFC bank account has been debited with Rs. 24,000.00 for Rent transfer via NetBanking on 01-06-2026.' },
   { id: 'demo-2', date: '2026-06-03T18:45:00.000Z', amount: 2499, currency: 'INR', merchant: 'Amazon', category: 'Shopping', subject: 'Your Amazon.in order #408-29381-2938102 confirmed', snippet: 'Order total: Rs. 2,499.00. Your item will be delivered tomorrow.', from: 'auto-confirm@amazon.in', bodySummary: 'Thank you for shopping with us. We will send a confirmation when items ship.\nOrder Total: Rs. 2,499.00\nPayment: HDFC Credit Card' },
@@ -399,14 +402,20 @@ export default function App() {
   });
 
   // Calculate overall statistics
-  const totalSpend = filteredExpenses.reduce((sum, e) => sum + getAmountInINR(e), 0);
-  const transactionCount = filteredExpenses.length;
+  const expenseOnlyFiltered = filteredExpenses.filter(e => e.category !== 'Salary');
+  const salaryOnlyFiltered = filteredExpenses.filter(e => e.category === 'Salary');
+
+  const totalSpend = expenseOnlyFiltered.reduce((sum, e) => sum + getAmountInINR(e), 0);
+  const transactionCount = expenseOnlyFiltered.length;
   
   // Calculate average expense
   const averageSpend = transactionCount > 0 ? totalSpend / transactionCount : 0;
 
+  // Calculate total salary received
+  const totalSalaryReceived = salaryOnlyFiltered.reduce((sum, e) => sum + getAmountInINR(e), 0);
+
   // Calculate category totals
-  const categoryData = filteredExpenses.reduce((acc, e) => {
+  const categoryData = expenseOnlyFiltered.reduce((acc, e) => {
     if (!e) return acc;
     const category = e.category || 'Other';
     const inrVal = getAmountInINR(e);
@@ -422,7 +431,7 @@ export default function App() {
 
   // Calculate monthly trend data (for the bar chart - last 6 months or whatever exists in filtered data)
   const monthlyTotalsMap = expenses.reduce((acc, e) => {
-    if (!e || !e.date) return acc;
+    if (!e || !e.date || e.category === 'Salary') return acc;
     const d = new Date(e.date);
     if (isNaN(d.getTime())) return acc;
     const year = d.getFullYear();
@@ -451,7 +460,7 @@ export default function App() {
   const FIXED_CATEGORIES = ['Rent', 'Investment', 'Subscriptions & Entertainment', 'Utilities & Bills', 'Credit Card'];
   let fixedSpend = 0;
   let discretionarySpend = 0;
-  filteredExpenses.forEach(e => {
+  expenseOnlyFiltered.forEach(e => {
     const amount = getAmountInINR(e);
     if (FIXED_CATEGORIES.includes(e.category)) {
       fixedSpend += amount;
@@ -464,7 +473,7 @@ export default function App() {
   const discretionaryPercentage = totalSplitSpend > 0 ? Math.round((discretionarySpend / totalSplitSpend) * 100) : 0;
 
   // 2. Top Merchants Bubble Chart
-  const merchantTotals = filteredExpenses.reduce((acc, e) => {
+  const merchantTotals = expenseOnlyFiltered.reduce((acc, e) => {
     if (!e) return acc;
     const name = e.merchant || 'Unknown Merchant';
     const inrVal = getAmountInINR(e);
@@ -483,7 +492,7 @@ export default function App() {
   // 3. Day of Week Spending Heatmap
   const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   const dayOfWeekSpends = Array(7).fill(0).map((_, idx) => ({ dayName: DAY_NAMES[idx], total: 0, count: 0 }));
-  filteredExpenses.forEach(e => {
+  expenseOnlyFiltered.forEach(e => {
     if (!e || !e.date) return;
     const d = new Date(e.date);
     if (isNaN(d.getTime())) return;
@@ -556,7 +565,7 @@ export default function App() {
       else if (e.category === 'Investment') totals.Investment += amount;
       else if (e.category === 'Food Delivery' || e.category === 'Dining Out') totals.Food += amount;
       else if (e.category === 'Shopping') totals.Shopping += amount;
-      else totals.Other += amount;
+      else if (e.category !== 'Salary') totals.Other += amount;
     });
     
     const totalMonthSpend = Object.values(totals).reduce((sum, v) => sum + v, 0);
@@ -565,6 +574,30 @@ export default function App() {
       label: new Date(parseInt(mKey.split('-')[0]), parseInt(mKey.split('-')[1]) - 1, 1).toLocaleString('en-US', { month: 'short' }) + ' ' + mKey.split('-')[0].substring(2),
       totals,
       totalMonthSpend
+    };
+  });
+
+  // Calculate salary trend data for monthly trends
+  const salaryTrendData = trendMonths.map(mKey => {
+    const monthExpenses = expenses.filter(e => {
+      if (!e || !e.date) return false;
+      const d = new Date(e.date);
+      if (isNaN(d.getTime())) return false;
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      return key === mKey;
+    });
+
+    let salaryAmount = 0;
+    monthExpenses.forEach(e => {
+      if (e.category === 'Salary') {
+        salaryAmount += getAmountInINR(e);
+      }
+    });
+
+    return {
+      monthKey: mKey,
+      label: new Date(parseInt(mKey.split('-')[0]), parseInt(mKey.split('-')[1]) - 1, 1).toLocaleString('en-US', { month: 'short' }) + ' ' + mKey.split('-')[0].substring(2),
+      amount: salaryAmount
     };
   });
 
@@ -674,6 +707,19 @@ export default function App() {
               <span className="metric-subtext">Across {transactionCount} payments</span>
             </div>
 
+            <div className="metric-card emerald">
+              <div className="metric-header">
+                <span className="metric-label">Salary Received</span>
+                <div className="metric-icon-box">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect width="20" height="12" x="2" y="6" rx="2"/><circle cx="12" cy="12" r="2"/><path d="M6 12h.01M18 12h.01"/>
+                  </svg>
+                </div>
+              </div>
+              <h2 className="metric-value" style={{ color: '#22c55e' }}>{formatCurrency(totalSalaryReceived)}</h2>
+              <span className="metric-subtext">Total monthly income</span>
+            </div>
+
             <div className="metric-card blue">
               <div className="metric-header">
                 <span className="metric-label">Average Transaction</span>
@@ -766,6 +812,13 @@ export default function App() {
                   onClick={() => setActiveAnalyticsTab('trends')}
                 >
                   📈 Stacked Category Trend
+                </button>
+                <button 
+                  type="button"
+                  className={`analytics-tab ${activeAnalyticsTab === 'salary' ? 'active' : ''}`}
+                  onClick={() => setActiveAnalyticsTab('salary')}
+                >
+                  💵 Salary History
                 </button>
               </div>
             </div>
@@ -1035,6 +1088,40 @@ export default function App() {
                 </div>
               )}
 
+              {/* Tab 6: Salary History */}
+              {activeAnalyticsTab === 'salary' && (
+                <div className="analytics-trends-layout">
+                  {salaryTrendData.length === 0 || salaryTrendData.every(s => s.amount === 0) ? (
+                    <div className="empty-state">No salary transaction data found. Sync your Gmail or add a salary transaction manually.</div>
+                  ) : (
+                    <div className="trends-chart-wrapper">
+                      <div className="trends-chart-legend" style={{ display: 'flex', justifyContent: 'center', gap: '16px', marginBottom: '24px' }}>
+                        <div className="legend-pill"><span className="legend-dot" style={{ backgroundColor: '#22c55e' }}></span> Monthly Salary Received</div>
+                      </div>
+
+                      <div className="trends-bar-chart">
+                        {salaryTrendData.map((m) => {
+                          const maxSalaryVal = Math.max(...salaryTrendData.map(item => item.amount), 1);
+                          const heightRatio = (m.amount / maxSalaryVal) * 85;
+
+                          return (
+                            <div key={m.monthKey} className="trend-bar-wrapper">
+                              <div className="trend-bar-fill-container" style={{ height: `${heightRatio}%` }}>
+                                <div className="trend-tooltip">
+                                  <strong>{m.label} Salary: {formatCurrency(m.amount)}</strong>
+                                </div>
+                                <div className="trend-slice salary" style={{ height: '100%', backgroundColor: '#22c55e', borderRadius: '4px 4px 0 0' }}></div>
+                              </div>
+                              <div className="trend-bar-label">{m.label}</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
             </div>
           </div>
 
@@ -1140,6 +1227,7 @@ export default function App() {
                   <option value="All">All Categories</option>
                   <option value="Investment">Investment</option>
                   <option value="Rent">Rent</option>
+                  <option value="Salary">Salary</option>
                   <option value="UPI Payment">UPI Payment</option>
                   <option value="Credit Card">Credit Card</option>
                   <option value="Food Delivery">Food Delivery</option>
@@ -1217,8 +1305,8 @@ export default function App() {
                               {category}
                             </span>
                           </td>
-                          <td className={`amount-text ${currency.toLowerCase()}`}>
-                            {currency === 'USD' ? '$' : '₹'}{amount.toFixed(2)}
+                          <td className={`amount-text ${currency.toLowerCase()} ${category === 'Salary' ? 'income' : ''}`}>
+                            {category === 'Salary' ? '+' : ''}{currency === 'USD' ? '$' : '₹'}{amount.toFixed(2)}
                           </td>
                         </tr>
                       );
@@ -1281,6 +1369,7 @@ export default function App() {
                     >
                       <option value="Investment">Investment</option>
                       <option value="Rent">Rent</option>
+                      <option value="Salary">Salary</option>
                       <option value="UPI Payment">UPI Payment</option>
                       <option value="Credit Card">Credit Card</option>
                       <option value="Food Delivery">Food Delivery</option>
@@ -1589,6 +1678,7 @@ export default function App() {
                     >
                       <option value="Investment">Investment</option>
                       <option value="Rent">Rent</option>
+                      <option value="Salary">Salary</option>
                       <option value="UPI Payment">UPI Payment</option>
                       <option value="Credit Card">Credit Card</option>
                       <option value="Food Delivery">Food Delivery</option>

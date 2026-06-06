@@ -40,6 +40,7 @@ function normalizeMerchant(text, fromEmail = '') {
   if (matchesKeyword(normalizedText, 'ppf') || normalizedText.includes('public provident')) return 'PPF';
   if (matchesKeyword(normalizedText, 'coin')) return 'Coin';
   if (matchesKeyword(normalizedText, 'rent') || normalizedText.includes('landlord')) return 'Rent';
+  if (normalizedText.includes('salary')) return 'Salary Payout';
 
   // Try to find a matched rule
   for (const rule of MERCHANT_RULES) {
@@ -81,6 +82,10 @@ function normalizeMerchant(text, fromEmail = '') {
 function getCategoryByContent(subject, snippet, body, merchantName) {
   const fullText = `${subject} ${snippet} ${body}`.toLowerCase();
   const merchantLower = merchantName.toLowerCase();
+
+  if (fullText.includes('salary') || merchantLower.includes('salary')) {
+    return 'Salary';
+  }
 
   // Helper helper to check list matches safely
   const hasKeyword = (keywords) => {
@@ -262,6 +267,7 @@ function parseEmail(email) {
   const { id, subject = '', snippet = '', body = '', from = '', date } = email;
 
   const subjectSnippet = `${subject} ${snippet}`.toLowerCase();
+  const fullText = `${subject} ${snippet} ${body}`.toLowerCase();
 
   // 1. Ignore failed, declined, cancelled, reversed, or returned transactions
   const failKeywords = [
@@ -272,11 +278,15 @@ function parseEmail(email) {
   }
 
   // 2. Ignore credits, refunds, card payments received, mutual fund redemptions (inflows/transfers)
-  const inflowKeywords = [
-    'payment received', 'refund', 'credited', 'redemption', 'cashback received', 'money received', 'auto-credited', 'reversal', 'received payment'
-  ];
-  if (inflowKeywords.some(kw => subjectSnippet.includes(kw))) {
-    return null;
+  // EXCEPT if it is a salary transaction
+  const isSalary = fullText.includes('salary');
+  if (!isSalary) {
+    const inflowKeywords = [
+      'payment received', 'refund', 'credited', 'redemption', 'cashback received', 'money received', 'auto-credited', 'reversal', 'received payment'
+    ];
+    if (inflowKeywords.some(kw => subjectSnippet.includes(kw))) {
+      return null;
+    }
   }
 
   // Extract amount and currency
