@@ -2,6 +2,19 @@
  * Regex-based email parser to extract expense information.
  */
 
+// Helper to match keyword safely, using word boundaries for short keywords (<= 4 chars)
+// to avoid matching inside other words (e.g., 'rent' in 'different', 'ola' in 'chocolate')
+function matchesKeyword(text, keyword) {
+  const kw = keyword.toLowerCase();
+  const t = text.toLowerCase();
+  if (kw.length <= 4) {
+    const escaped = kw.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+    const regex = new RegExp(`\\b${escaped}\\b`, 'i');
+    return regex.test(t);
+  }
+  return t.includes(kw);
+}
+
 // Known merchant mappings to categories (Initial guess, content scan overrides this)
 const MERCHANT_RULES = [
   { keywords: ['groww', 'zerodha', 'smallcase', 'indmoney', 'coin', 'mutual fund', 'sip', 'securities', 'etmoney', 'nps', 'ppf'], category: 'Investment' },
@@ -11,7 +24,7 @@ const MERCHANT_RULES = [
   { keywords: ['uber', 'ola', 'taxi', 'irctc', 'indigo', 'makemytrip', 'airlines', 'railway', 'flight'], category: 'Travel & Commute' },
   { keywords: ['amazon', 'flipkart', 'walmart', 'target', 'myntra', 'ajio', 'nykaa', 'tata cliq', 'shopify'], category: 'Shopping' },
   { keywords: ['netflix', 'spotify', 'steam', 'youtube premium', 'apple.com/bill', 'itunes', 'disney', 'hotstar'], category: 'Subscriptions & Entertainment' },
-  { keywords: ['electricity', 'bescom', 'recharge', 'jio', 'airtel', 'act fibernet', 'comcast', 'verizon', 'att', 'telecom', 'gas', 'water'], category: 'Utilities & Bills' },
+  { keywords: ['electricity', 'bescom', 'recharge', 'jio', 'airtel', 'act fibernet', 'broadband', 'telecom', 'gas', 'water'], category: 'Utilities & Bills' },
   { keywords: ['rent', 'houserent', 'house rent', 'landlord'], category: 'Rent' }
 ];
 
@@ -23,15 +36,15 @@ function normalizeMerchant(text, fromEmail = '') {
 
   // Custom exact overrides for investments first
   if (normalizedText.includes('etmoney')) return 'ETMoney';
-  if (normalizedText.includes('nps') || normalizedText.includes('national pension')) return 'NPS';
-  if (normalizedText.includes('ppf') || normalizedText.includes('public provident')) return 'PPF';
-  if (normalizedText.includes('coin')) return 'Coin';
-  if (normalizedText.includes('rent') || normalizedText.includes('landlord')) return 'Rent';
+  if (matchesKeyword(normalizedText, 'nps') || normalizedText.includes('national pension')) return 'NPS';
+  if (matchesKeyword(normalizedText, 'ppf') || normalizedText.includes('public provident')) return 'PPF';
+  if (matchesKeyword(normalizedText, 'coin')) return 'Coin';
+  if (matchesKeyword(normalizedText, 'rent') || normalizedText.includes('landlord')) return 'Rent';
 
   // Try to find a matched rule
   for (const rule of MERCHANT_RULES) {
     for (const kw of rule.keywords) {
-      if (normalizedText.includes(kw)) {
+      if (matchesKeyword(normalizedText, kw)) {
         if (kw === 'apple.com/bill' || kw === 'itunes') return 'Apple';
         if (kw === 'youtube premium') return 'YouTube';
         return kw.charAt(0).toUpperCase() + kw.slice(1);
@@ -69,63 +82,68 @@ function getCategoryByContent(subject, snippet, body, merchantName) {
   const fullText = `${subject} ${snippet} ${body}`.toLowerCase();
   const merchantLower = merchantName.toLowerCase();
 
+  // Helper helper to check list matches safely
+  const hasKeyword = (keywords) => {
+    return keywords.some(kw => matchesKeyword(fullText, kw) || matchesKeyword(merchantLower, kw));
+  };
+
   // 1. Investment
   const investmentKeywords = ['groww', 'zerodha', 'mutual fund', 'mutualfund', 'sip', 'smallcase', 'coin by', 'coin', 'wazirx', 'investment', 'invested', 'securities', 'indmoney', 'axis direct', 'hsb mutual', 'demat', 'stocks', 'ipo fund', 'etmoney', 'nps', 'ppf', 'national pension', 'public provident', 'provident fund', 'nps contribution', 'ppf contribution'];
-  if (investmentKeywords.some(kw => fullText.includes(kw) || merchantLower.includes(kw))) {
+  if (hasKeyword(investmentKeywords)) {
     return 'Investment';
   }
 
   // 1.5 Rent
   const rentKeywords = ['rent', 'houserent', 'house rent', 'landlord', 'rent payment', 'rent paid'];
-  if (rentKeywords.some(kw => fullText.includes(kw) || merchantLower.includes(kw))) {
+  if (hasKeyword(rentKeywords)) {
     return 'Rent';
   }
 
   // 2. Credit Card
   const ccKeywords = ['credit card', 'hdfc cc', 'sbi card', 'icici card', 'onecard', 'amex', 'american express', 'card bill', 'cc payment', 'total amount due', 'minimum amount due', 'card ending in'];
-  if (ccKeywords.some(kw => fullText.includes(kw) || merchantLower.includes(kw))) {
+  if (hasKeyword(ccKeywords)) {
     return 'Credit Card';
   }
 
   // 3. UPI
   const upiKeywords = ['upi ref', 'transfer via upi', 'upi transfer', 'vpa', 'paytm wallet', 'gpay', 'phonepe', 'bhim upi', 'upi/', 'upi payment', 'sent money via upi', 'debited via upi'];
-  if (upiKeywords.some(kw => fullText.includes(kw) || merchantLower.includes(kw))) {
+  if (hasKeyword(upiKeywords)) {
     return 'UPI Payment';
   }
 
   // 4. Food Delivery
   const foodDeliveryKeywords = ['swiggy', 'zomato', 'ubereats', 'foodpanda', 'instamart', 'blinkit', 'zepto'];
-  if (foodDeliveryKeywords.some(kw => fullText.includes(kw) || merchantLower.includes(kw))) {
+  if (hasKeyword(foodDeliveryKeywords)) {
     return 'Food Delivery';
   }
 
   // 5. Dining Out
   const diningKeywords = ['starbucks', 'mcdonald', 'dominos', 'pizza', 'restaurant', 'grill', 'cafe', 'bar & kitchen', 'brewery', 'diner', 'pub', 'patisserie', 'bakery', 'coffee house', 'bistro'];
-  if (diningKeywords.some(kw => fullText.includes(kw) || merchantLower.includes(kw))) {
+  if (hasKeyword(diningKeywords)) {
     return 'Dining Out';
   }
 
   // 6. Travel & Commute
   const travelKeywords = ['uber', 'lyft', 'ola', 'grab', 'taxi', 'irctc', 'indigo', 'airlines', 'flight', 'railway', 'makemytrip', 'easemytrip', 'goibibo', 'hotel', 'metro', 'toll', 'fastag'];
-  if (travelKeywords.some(kw => fullText.includes(kw) || merchantLower.includes(kw))) {
+  if (hasKeyword(travelKeywords)) {
     return 'Travel & Commute';
   }
 
   // 7. Shopping
   const shoppingKeywords = ['amazon', 'flipkart', 'walmart', 'target', 'ebay', 'aliexpress', 'shopify', 'bestbuy', 'ikea', 'myntra', 'ajio', 'nykaa', 'tata cliq', 'clothing', 'retail'];
-  if (shoppingKeywords.some(kw => fullText.includes(kw) || merchantLower.includes(kw))) {
+  if (hasKeyword(shoppingKeywords)) {
     return 'Shopping';
   }
 
   // 8. Subscriptions & Entertainment
   const subKeywords = ['netflix', 'spotify', 'steam', 'disney', 'hulu', 'hbo', 'playstation', 'xbox', 'nintendo', 'itunes', 'apple.com/bill', 'youtube premium', 'membership', 'subscription', 'renewed', 'patreon'];
-  if (subKeywords.some(kw => fullText.includes(kw) || merchantLower.includes(kw))) {
+  if (hasKeyword(subKeywords)) {
     return 'Subscriptions & Entertainment';
   }
 
   // 9. Utilities & Bills
   const utilityKeywords = ['electricity', 'power', 'water', 'comcast', 'verizon', 'att', 't-mobile', 'recharge', 'telecom', 'insurance', 'gas', 'bill payment', 'jio', 'airtel', 'act fibernet', 'broadband'];
-  if (utilityKeywords.some(kw => fullText.includes(kw) || merchantLower.includes(kw))) {
+  if (hasKeyword(utilityKeywords)) {
     return 'Utilities & Bills';
   }
 
@@ -136,7 +154,28 @@ function getCategoryByContent(subject, snippet, body, merchantName) {
  * Extracts expense amount and currency
  */
 function extractAmountAndCurrency(subject, snippet, body) {
-  const searchTexts = [subject, snippet, body].filter(Boolean);
+  let cleanSubject = subject || '';
+  let cleanSnippet = snippet || '';
+  let cleanBody = body || '';
+  
+  // Pre-process text to remove "available limit", "available balance", "credit limit", "account balance" patterns
+  // to avoid extracting the balance/limit instead of the transaction amount
+  const ignorePatterns = [
+    /available\s+(?:limit|balance|bal)\D*[\d,]+(?:\.\d{2})?/gi,
+    /credit\s+limit\D*[\d,]+(?:\.\d{2})?/gi,
+    /bal(?:ance)?\s*(?:is|outstanding)\D*[\d,]+(?:\.\d{2})?/gi,
+    /unbilled\s+outstanding\D*[\d,]+(?:\.\d{2})?/gi,
+    /ledger\s+balance\D*[\d,]+(?:\.\d{2})?/gi,
+    /limit\s+is\D*[\d,]+(?:\.\d{2})?/gi
+  ];
+  
+  ignorePatterns.forEach(pattern => {
+    cleanSubject = cleanSubject.replace(pattern, '');
+    cleanSnippet = cleanSnippet.replace(pattern, '');
+    cleanBody = cleanBody.replace(pattern, '');
+  });
+
+  const searchTexts = [cleanSubject, cleanSnippet, cleanBody].filter(Boolean);
   
   // Look for INR / Rs. patterns first
   const inrRegexes = [
@@ -192,10 +231,21 @@ function extractAmountAndCurrency(subject, snippet, body) {
       if (!isNaN(amount) && amount > 0) {
         // Detect currency symbol nearby
         const index = text.indexOf(match[1]);
-        const context = text.slice(Math.max(0, index - 5), Math.min(text.length, index + match[1].length + 5));
-        let currency = 'USD'; // Default fallback
-        if (context.includes('₹') || context.toLowerCase().includes('rs') || context.toLowerCase().includes('inr')) {
-          currency = 'INR';
+        const context = text.slice(Math.max(0, index - 5), Math.min(text.length, index + match[1].length + 5)).toLowerCase();
+        
+        let currency = 'INR'; // Safe default for an Indian expense tracker
+        
+        // Match USD indicators
+        if (context.includes('$') || context.includes('usd')) {
+          currency = 'USD';
+        } else {
+          // Check if the overall email mentions USD and not Rupees nearby
+          const fullEmailLower = `${subject || ''} ${snippet || ''} ${body || ''}`.toLowerCase();
+          if (fullEmailLower.includes('$') || fullEmailLower.includes('usd')) {
+            if (!context.includes('₹') && !context.includes('rs') && !context.includes('inr')) {
+              currency = 'USD';
+            }
+          }
         }
         return { amount, currency };
       }
@@ -210,6 +260,24 @@ function extractAmountAndCurrency(subject, snippet, body) {
  */
 function parseEmail(email) {
   const { id, subject = '', snippet = '', body = '', from = '', date } = email;
+
+  const subjectSnippet = `${subject} ${snippet}`.toLowerCase();
+
+  // 1. Ignore failed, declined, cancelled, reversed, or returned transactions
+  const failKeywords = [
+    'failed', 'decline', 'cancel', 'reverse', 'unsuccessful', 'bounce', 'rejected', 'void', 'failure'
+  ];
+  if (failKeywords.some(kw => subjectSnippet.includes(kw))) {
+    return null;
+  }
+
+  // 2. Ignore credits, refunds, card payments received, mutual fund redemptions (inflows/transfers)
+  const inflowKeywords = [
+    'payment received', 'refund', 'credited', 'redemption', 'cashback received', 'money received', 'auto-credited', 'reversal', 'received payment'
+  ];
+  if (inflowKeywords.some(kw => subjectSnippet.includes(kw))) {
+    return null;
+  }
 
   // Extract amount and currency
   const amountDetails = extractAmountAndCurrency(subject, snippet, body);
