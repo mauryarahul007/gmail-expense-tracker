@@ -48,6 +48,15 @@ export default function App() {
   const [rawBody, setRawBody] = useState('');
   const [rawDate, setRawDate] = useState(new Date().toISOString().substring(0, 10));
 
+  // Add Manual Transaction form
+  const [showAddManualModal, setShowAddManualModal] = useState(false);
+  const [manualMerchant, setManualMerchant] = useState('');
+  const [manualAmount, setManualAmount] = useState('');
+  const [manualCurrency, setManualCurrency] = useState('INR');
+  const [manualDate, setManualDate] = useState(new Date().toISOString().substring(0, 10));
+  const [manualCategory, setManualCategory] = useState('Other');
+  const [manualNotes, setManualNotes] = useState('');
+
   const BACKEND_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
   // Check auth status & read live data if available
@@ -262,6 +271,75 @@ export default function App() {
     }
   };
 
+  const handleAddManualSubmit = async (e) => {
+    e.preventDefault();
+    if (!manualMerchant || !manualAmount || !manualDate) {
+      alert('Merchant, Amount and Date are required.');
+      return;
+    }
+    const parsedAmount = Number(manualAmount);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      alert('Please enter a valid positive amount.');
+      return;
+    }
+
+    if (dataSource === 'demo') {
+      const mockId = 'demo-manual-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+      const newExpense = {
+        id: mockId,
+        date: new Date(manualDate).toISOString(),
+        amount: parsedAmount,
+        currency: manualCurrency,
+        merchant: manualMerchant,
+        category: manualCategory,
+        subject: 'Manual Transaction',
+        snippet: manualNotes || '',
+        from: 'Manual Entry',
+        bodySummary: manualNotes || ''
+      };
+      setExpenses(prev => [newExpense, ...prev]);
+      alert('Transaction added successfully (Demo Mode)!');
+      setShowAddManualModal(false);
+      resetManualForm();
+    } else {
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/expenses`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            date: new Date(manualDate).toISOString(),
+            amount: parsedAmount,
+            currency: manualCurrency,
+            merchant: manualMerchant,
+            category: manualCategory,
+            snippet: manualNotes
+          })
+        });
+
+        if (res.ok) {
+          alert('Transaction added successfully!');
+          setShowAddManualModal(false);
+          resetManualForm();
+          fetchLiveExpenses();
+        } else {
+          const data = await res.json();
+          alert('Failed to add transaction: ' + data.error);
+        }
+      } catch (err) {
+        alert('Failed to connect to backend.');
+      }
+    }
+  };
+
+  const resetManualForm = () => {
+    setManualMerchant('');
+    setManualAmount('');
+    setManualCurrency('INR');
+    setManualDate(new Date().toISOString().substring(0, 10));
+    setManualCategory('Other');
+    setManualNotes('');
+  };
+
   // --- Filtering & Stat Calculations ---
 
   // Hardcode exchange rate for presentation purposes: 1 USD = 83 INR
@@ -431,11 +509,16 @@ export default function App() {
               </p>
             </div>
 
-            {dataSource === 'live' && (
-              <button className="btn btn-secondary" onClick={() => setShowUploadModal(true)}>
-                📥 Parse EML Content
+            <div style={{ display: 'flex', gap: '12px' }}>
+              {dataSource === 'live' && (
+                <button className="btn btn-secondary" onClick={() => setShowUploadModal(true)}>
+                  📥 Parse EML Content
+                </button>
+              )}
+              <button className="btn btn-primary" onClick={() => setShowAddManualModal(true)}>
+                ➕ Add Transaction
               </button>
-            )}
+            </div>
           </div>
 
           {/* Month Navigation Tab System */}
@@ -976,6 +1059,126 @@ export default function App() {
                 </button>
                 <button type="submit" className="btn btn-primary">
                   Extract & Add Expense
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 4: Add Transaction Manually */}
+      {showAddManualModal && (
+        <div className="modal-overlay" onClick={() => setShowAddManualModal(false)}>
+          <div className="modal-content" style={{ maxWidth: '600px' }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">Add Transaction Manually</h3>
+              <button className="close-btn" onClick={() => setShowAddManualModal(false)}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M18 6 6 18M6 6l12 12"/>
+                </svg>
+              </button>
+            </div>
+            
+            <form onSubmit={handleAddManualSubmit}>
+              <div className="modal-body">
+                <p style={{ color: 'var(--text-secondary)', fontSize: '13px', marginBottom: '20px', lineHeight: 1.6 }}>
+                  Enter the transaction details manually. This transaction will be recorded directly {dataSource === 'demo' ? 'in-memory (Sandbox mode)' : 'to your database'}.
+                </p>
+
+                <div className="form-group">
+                  <label className="form-label">Merchant Name</label>
+                  <input 
+                    type="text" 
+                    className="form-input" 
+                    placeholder="e.g. Zomato, Starbucks, Rent"
+                    value={manualMerchant}
+                    onChange={(e) => setManualMerchant(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '16px', marginBottom: '20px' }}>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Amount</label>
+                    <input 
+                      type="number" 
+                      step="any"
+                      min="0.01"
+                      className="form-input" 
+                      placeholder="0.00"
+                      value={manualAmount}
+                      onChange={(e) => setManualAmount(e.target.value)}
+                      required
+                    />
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Currency</label>
+                    <select 
+                      className="filter-select" 
+                      style={{ width: '100%', padding: '12px 16px' }}
+                      value={manualCurrency}
+                      onChange={(e) => setManualCurrency(e.target.value)}
+                    >
+                      <option value="INR">₹ INR</option>
+                      <option value="USD">$ USD</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Transaction Date</label>
+                    <input 
+                      type="date" 
+                      className="form-input"
+                      value={manualDate}
+                      onChange={(e) => setManualDate(e.target.value)}
+                      required
+                    />
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Category</label>
+                    <select 
+                      className="filter-select"
+                      style={{ width: '100%', padding: '12px 16px' }}
+                      value={manualCategory}
+                      onChange={(e) => setManualCategory(e.target.value)}
+                    >
+                      <option value="Investment">Investment</option>
+                      <option value="Rent">Rent</option>
+                      <option value="UPI Payment">UPI Payment</option>
+                      <option value="Credit Card">Credit Card</option>
+                      <option value="Food Delivery">Food Delivery</option>
+                      <option value="Dining Out">Dining Out</option>
+                      <option value="Travel & Commute">Travel & Commute</option>
+                      <option value="Shopping">Shopping</option>
+                      <option value="Subscriptions & Entertainment">Subscriptions & Entertainment</option>
+                      <option value="Utilities & Bills">Utilities & Bills</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Notes / Description (Optional)</label>
+                  <textarea 
+                    className="form-input" 
+                    style={{ height: '100px', resize: 'vertical' }}
+                    placeholder="E.g. Dinner with friends, monthly electric bill, etc."
+                    value={manualNotes}
+                    onChange={(e) => setManualNotes(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="modal-footer">
+                <button type="button" className="btn btn-secondary" onClick={() => setShowAddManualModal(false)}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary">
+                  Add Expense
                 </button>
               </div>
             </form>

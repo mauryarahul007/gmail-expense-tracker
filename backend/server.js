@@ -284,6 +284,39 @@ app.post('/api/upload-raw', async (req, res) => {
   }
 });
 
+/**
+ * 11. Add Manual Expense
+ */
+app.post('/api/expenses', async (req, res) => {
+  try {
+    const { date, amount, currency, merchant, category, snippet } = req.body;
+    
+    if (!date || !amount || !merchant) {
+      return res.status(400).json({ error: 'Date, amount, and merchant are required.' });
+    }
+
+    const manualId = 'manual-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+    
+    const newExpense = new Expense({
+      id: manualId,
+      date: new Date(date),
+      amount: Number(amount),
+      currency: currency || 'INR',
+      merchant,
+      category: category || 'Other',
+      subject: 'Manual Transaction',
+      snippet: snippet || '',
+      from: 'Manual Entry',
+      bodySummary: snippet || ''
+    });
+
+    await newExpense.save();
+    res.json({ success: true, expense: newExpense });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Start the server
 app.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}`);
