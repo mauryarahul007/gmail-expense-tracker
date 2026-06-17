@@ -294,23 +294,42 @@ function parseEmail(email) {
   //    that don't contain the word "salary" (e.g. "Account Credited via NEFT")
   const SALARY_KW = [
     'salary', 'payroll', 'sal credit', 'salary credit', 'salary paid',
-    'salary deposited', 'salary disbursed', 'salary transfer', 'salary for',
-    'monthly salary', 'wages', 'remuneration', 'pay roll', 'stipend', 'monthly pay'
+    'salary deposited', 'salary disbursed', 'salary transfer', 'salary for the month',
+    'monthly salary', 'wages', 'remuneration', 'pay roll', 'stipend'
   ];
-  const isSalaryKeyword = SALARY_KW.some(kw => fullText.includes(kw));
 
-  // Heuristic: a large NEFT/IMPS/bank credit (≥ ₹50,000) is almost certainly
-  // a salary or large transfer — keep it even if "salary" never appears in the email.
+  // Salary keywords must match in the subject+snippet (first 150 chars) — NOT just
+  // anywhere in the body, which catches promotional emails like:
+  //   "Protect Your Take-Home Salary" (ClearTax)
+  //   "Salary Credited. Bags Packed??" (ixigo)
+  //   "Get Salary upto Rs.40000" (WorkIndia job ads)
+  const isSalaryKeyword = SALARY_KW.some(kw => subjectSnippet.includes(kw));
+
+  // Block promotional / marketing senders that mention salary in ad context.
+  // Real salary alerts always come from bank domains.
+  const PROMO_SENDER_PATTERNS = [
+    /workindia/i, /ixigo/i, /naukri/i, /linkedin/i, /indeed/i,
+    /cleartax/i, /zerodha/i, /groww/i, /paytm/i, /policybazaar/i,
+    /moneycontrol/i, /economictimes/i, /jobs?\./i, /career/i
+  ];
+  const isPromoSender = PROMO_SENDER_PATTERNS.some(re => re.test(from));
+
+  // Heuristic: a large NEFT/IMPS/bank credit (≥ ₹25,000) from a bank sender is
+  // almost certainly a salary or large transfer — keep it even if "salary" is absent.
+  // Requires a real bank sender domain to avoid job-ad false positives.
+  const BANK_SENDER_PATTERN = /\.net$|hdfcbank|icicibank|sbi\.co|axisbank|kotakbank|yesbank|federalbank|idfcfirst|indusind|pnb|bob\.co|rbl|citi|hsbc|sc\.com/i;
   const isLargeBankCredit =
+    !isPromoSender &&
+    BANK_SENDER_PATTERN.test(from) &&
     amountDetails.currency === 'INR' &&
-    amountDetails.amount >= 50000 &&
+    amountDetails.amount >= 25000 &&
     (subjectSnippet.includes('neft') || subjectSnippet.includes('imps') ||
      subjectSnippet.includes('credited') || subjectSnippet.includes('credit')) &&
     !subjectSnippet.includes('refund') &&
     !subjectSnippet.includes('cashback') &&
     !subjectSnippet.includes('redemption');
 
-  const isSalary = isSalaryKeyword || isLargeBankCredit;
+  const isSalary = (isSalaryKeyword && !isPromoSender) || isLargeBankCredit;
 
   // 4. Skip pure inflow emails (refunds, cashbacks) — but NOT salary / large credits
   //    NOTE: bare "credited" is intentionally removed — it is too broad and blocks salary.

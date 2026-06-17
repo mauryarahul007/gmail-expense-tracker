@@ -366,25 +366,27 @@ app.post('/api/upload-statement', upload.single('statement'), async (req, res) =
 });
 
 /**
- * 13. Purge Bank Statement Imports by Date Range
+ * 13. Purge Bank Statement Imports Outside a Date Range
  *
  * DELETE /api/purge-statement-imports
- * Body: { before?: ISO date string, after?: ISO date string }
+ * Body: { startDate?: ISO string, endDate?: ISO string }
  *
- * Deletes all expenses whose id starts with "stmt-" and whose date falls
- * OUTSIDE the optional before/after range (i.e. were imported with wrong dates).
+ * Deletes all stmt- expenses whose date falls OUTSIDE [startDate, endDate].
+ * Used to clean up wrongly-dated statement imports.
  * If no range is given, deletes ALL stmt- records.
  */
 app.delete('/api/purge-statement-imports', async (req, res) => {
   try {
-    const { before, after } = req.body || {};
+    const { startDate, endDate } = req.body || {};
 
     const filter = { id: /^stmt-/ };
 
-    if (before || after) {
-      filter.date = {};
-      if (after)  filter.date.$lt = new Date(after);   // before the valid start
-      if (before) filter.date.$gt = new Date(before);  // after the valid end
+    if (startDate || endDate) {
+      // Delete records OUTSIDE the valid range: date < startDate OR date > endDate
+      const conditions = [];
+      if (startDate) conditions.push({ date: { $lt: new Date(startDate) } });
+      if (endDate)   conditions.push({ date: { $gt: new Date(endDate) } });
+      if (conditions.length > 0) filter.$or = conditions;
     }
 
     const result = await Expense.deleteMany(filter);
