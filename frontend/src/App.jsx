@@ -54,6 +54,12 @@ export default function App() {
   const [rawBody, setRawBody] = useState('');
   const [rawDate, setRawDate] = useState(new Date().toISOString().substring(0, 10));
 
+  // Bank Statement upload
+  const [showStatementModal, setShowStatementModal] = useState(false);
+  const [statementFile, setStatementFile] = useState(null);
+  const [statementUploading, setStatementUploading] = useState(false);
+  const [statementResult, setStatementResult] = useState(null);
+
   // Add Manual Transaction form
   const [showAddManualModal, setShowAddManualModal] = useState(false);
   const [manualMerchant, setManualMerchant] = useState('');
@@ -344,6 +350,39 @@ export default function App() {
     setManualDate(new Date().toISOString().substring(0, 10));
     setManualCategory('Other');
     setManualNotes('');
+  };
+
+  const handleStatementUpload = async (e) => {
+    e.preventDefault();
+    if (!statementFile) {
+      alert('Please select a CSV file first.');
+      return;
+    }
+    if (dataSource === 'demo') {
+      alert('Please switch to "Live Workspace / Local DB" before uploading a bank statement.');
+      return;
+    }
+    setStatementUploading(true);
+    setStatementResult(null);
+    try {
+      const formData = new FormData();
+      formData.append('statement', statementFile);
+      const res = await fetch(`${BACKEND_URL}/api/upload-statement`, {
+        method: 'POST',
+        body: formData
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setStatementResult(data);
+        fetchLiveExpenses();
+      } else {
+        alert('Upload failed: ' + (data.error || 'Unknown error'));
+      }
+    } catch (err) {
+      alert('Could not connect to backend: ' + err.message);
+    } finally {
+      setStatementUploading(false);
+    }
   };
 
   // --- Filtering & Stat Calculations ---
@@ -667,12 +706,19 @@ export default function App() {
               </p>
             </div>
 
-            <div style={{ display: 'flex', gap: '12px' }}>
+            <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
               {dataSource === 'live' && (
                 <button className="btn btn-secondary" onClick={() => setShowUploadModal(true)}>
                   📥 Parse EML Content
                 </button>
               )}
+              <button
+                className="btn btn-secondary"
+                onClick={() => { setStatementResult(null); setStatementFile(null); setShowStatementModal(true); }}
+                style={{ borderColor: 'var(--green)', color: 'var(--green)' }}
+              >
+                🏦 Upload Bank Statement
+              </button>
               <button className="btn btn-primary" onClick={() => setShowAddManualModal(true)}>
                 ➕ Add Transaction
               </button>
@@ -1592,6 +1638,204 @@ export default function App() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 4a: Bank Statement Upload & Reconcile */}
+      {showStatementModal && (
+        <div className="modal-overlay" onClick={() => { if (!statementUploading) setShowStatementModal(false); }}>
+          <div className="modal-content" style={{ maxWidth: '680px' }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">🏦 Upload Bank Statement</h3>
+              <button className="close-btn" onClick={() => { if (!statementUploading) setShowStatementModal(false); }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M18 6 6 18M6 6l12 12"/>
+                </svg>
+              </button>
+            </div>
+
+            {statementResult ? (
+              /* ── Reconciliation Results ── */
+              <div className="modal-body">
+                <div style={{ textAlign: 'center', marginBottom: '24px' }}>
+                  <div style={{ fontSize: '40px', marginBottom: '8px' }}>✅</div>
+                  <h4 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--green)' }}>Reconciliation Complete</h4>
+                  <p style={{ color: 'var(--text-secondary)', fontSize: '13px', marginTop: '4px' }}>
+                    Your bank statement has been cross-checked against existing transactions.
+                  </p>
+                </div>
+
+                {/* Summary counts */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '24px' }}>
+                  {[
+                    { label: 'Bank Entries', value: statementResult.totalBankTransactions, color: 'var(--blue)' },
+                    { label: 'Matched', value: statementResult.matched, color: 'var(--purple)' },
+                    { label: 'Updated', value: statementResult.updated, color: 'var(--orange)' },
+                    { label: 'New Added', value: statementResult.added, color: 'var(--green)' }
+                  ].map(card => (
+                    <div key={card.label} style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '14px', textAlign: 'center' }}>
+                      <div style={{ fontSize: '26px', fontWeight: 800, color: card.color }}>{card.value}</div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', fontWeight: 600 }}>{card.label}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Updated details */}
+                {statementResult.updatedDetails && statementResult.updatedDetails.length > 0 && (
+                  <div style={{ marginBottom: '20px' }}>
+                    <h5 style={{ fontSize: '13px', fontWeight: 700, color: 'var(--orange)', marginBottom: '10px' }}>
+                      🔄 Category / Merchant Updates ({statementResult.updatedDetails.length})
+                    </h5>
+                    <div style={{ maxHeight: '180px', overflowY: 'auto' }}>
+                      <table className="expenses-table" style={{ fontSize: '12px' }}>
+                        <thead>
+                          <tr>
+                            <th>Bank Narration</th>
+                            <th>Old Category</th>
+                            <th>New Category</th>
+                            <th style={{ textAlign: 'right' }}>Amount</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {statementResult.updatedDetails.map((u, i) => (
+                            <tr key={i}>
+                              <td style={{ maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-secondary)' }}>{u.bankNarration}</td>
+                              <td><span className="category-tag" style={{ opacity: 0.6 }}>{u.oldCategory}</span></td>
+                              <td><span className="category-tag" style={{ borderColor: 'var(--orange)', color: 'var(--orange)' }}>{u.newCategory}</span></td>
+                              <td style={{ textAlign: 'right', color: 'var(--text-primary)', fontWeight: 600 }}>₹{Number(u.amount).toFixed(2)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Added details */}
+                {statementResult.addedDetails && statementResult.addedDetails.length > 0 && (
+                  <div>
+                    <h5 style={{ fontSize: '13px', fontWeight: 700, color: 'var(--green)', marginBottom: '10px' }}>
+                      ➕ New Transactions Added ({statementResult.addedDetails.length})
+                    </h5>
+                    <div style={{ maxHeight: '160px', overflowY: 'auto' }}>
+                      <table className="expenses-table" style={{ fontSize: '12px' }}>
+                        <thead>
+                          <tr>
+                            <th>Merchant</th>
+                            <th>Category</th>
+                            <th>Date</th>
+                            <th style={{ textAlign: 'right' }}>Amount</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {statementResult.addedDetails.map((a, i) => (
+                            <tr key={i}>
+                              <td style={{ fontWeight: 600 }}>{a.merchant}</td>
+                              <td><span className="category-tag">{a.category}</span></td>
+                              <td style={{ color: 'var(--text-muted)' }}>{new Date(a.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
+                              <td style={{ textAlign: 'right', color: 'var(--green)', fontWeight: 600 }}>₹{Number(a.amount).toFixed(2)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {statementResult.updated === 0 && statementResult.added === 0 && (
+                  <div style={{ textAlign: 'center', padding: '16px', color: 'var(--text-muted)', fontSize: '13px' }}>
+                    All transactions were already present and correctly categorised. No changes needed.
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* ── Upload Form ── */
+              <form onSubmit={handleStatementUpload}>
+                <div className="modal-body">
+                  {dataSource === 'demo' && (
+                    <div style={{ padding: '12px', background: 'rgba(251, 191, 36, 0.1)', border: '1px solid var(--orange)', borderRadius: '8px', marginBottom: '20px', color: 'var(--orange)', fontSize: '13px', fontWeight: 600 }}>
+                      ⚠ You are in Demo Sandbox mode. Switch to <strong>Live Workspace / Local DB</strong> to upload a real bank statement.
+                    </div>
+                  )}
+
+                  <p style={{ color: 'var(--text-secondary)', fontSize: '14px', marginBottom: '20px', lineHeight: 1.7 }}>
+                    Upload your monthly bank statement as a <strong>CSV file</strong>. The app will automatically detect
+                    your bank format and cross-check every debit entry against your existing transactions — updating
+                    categories and merchants where your bank's narration provides better data, and adding any
+                    transactions that were missed in the Gmail sync.
+                  </p>
+
+                  {/* Bank format guide */}
+                  <div className="step-card" style={{ marginBottom: '20px' }}>
+                    <span className="step-num">?</span>
+                    <span className="step-title">Supported Bank Formats (CSV)</span>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginTop: '10px' }}>
+                      {['HDFC Bank', 'ICICI Bank', 'SBI', 'Axis Bank', 'Kotak Bank', 'Generic CSV'].map(bank => (
+                        <div key={bank} style={{ background: 'rgba(0,0,0,0.2)', borderRadius: '6px', padding: '6px 10px', fontSize: '12px', color: 'var(--text-secondary)', textAlign: 'center', border: '1px solid var(--border-color)' }}>
+                          {bank}
+                        </div>
+                      ))}
+                    </div>
+                    <p className="helper-text" style={{ marginTop: '10px' }}>
+                      To download: Login to your bank's Net Banking → Statements → Download as CSV (not PDF).
+                    </p>
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label">Bank Statement CSV File</label>
+                    <input
+                      type="file"
+                      accept=".csv,text/csv"
+                      className="form-input"
+                      style={{ cursor: 'pointer', padding: '10px' }}
+                      onChange={(e) => setStatementFile(e.target.files[0] || null)}
+                      required
+                    />
+                    {statementFile && (
+                      <p style={{ fontSize: '12px', color: 'var(--green)', marginTop: '6px' }}>
+                        ✓ Selected: {statementFile.name} ({(statementFile.size / 1024).toFixed(1)} KB)
+                      </p>
+                    )}
+                  </div>
+
+                  <div style={{ padding: '12px', background: 'rgba(96, 165, 250, 0.08)', border: '1px solid rgba(96, 165, 250, 0.2)', borderRadius: '8px', fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+                    <strong style={{ color: 'var(--blue)' }}>How reconciliation works:</strong><br/>
+                    • Debits from your statement are matched to existing transactions by date (±2 days) and amount (±2%)<br/>
+                    • Matched entries get their category and merchant updated if the bank narration is more specific<br/>
+                    • Unmatched entries are inserted as new transactions (source: bank statement)<br/>
+                    • Credit entries (salary, refunds) are skipped — only outflows are processed
+                  </div>
+                </div>
+
+                <div className="modal-footer">
+                  <button type="button" className="btn btn-secondary" onClick={() => setShowStatementModal(false)} disabled={statementUploading}>
+                    Cancel
+                  </button>
+                  <button type="submit" className="btn btn-primary" disabled={statementUploading || !statementFile || dataSource === 'demo'}>
+                    {statementUploading ? (
+                      <>
+                        <svg className="rotating" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+                        </svg>
+                        Reconciling...
+                      </>
+                    ) : '🔍 Reconcile Transactions'}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {statementResult && (
+              <div className="modal-footer">
+                <button className="btn btn-secondary" onClick={() => { setStatementResult(null); setStatementFile(null); }}>
+                  Upload Another
+                </button>
+                <button className="btn btn-primary" onClick={() => setShowStatementModal(false)}>
+                  Done
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

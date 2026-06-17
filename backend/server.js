@@ -17,8 +17,13 @@ const {
 } = require('./gmail-client');
 
 const { parseEmail } = require('./parser');
+const { parseStatementCSV } = require('./statement-parser');
+const { reconcileStatementWithDB } = require('./statement-reconcile');
+const multer = require('multer');
 
 const app = express();
+// Multer: store uploaded files in memory (no disk I/O needed)
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 const PORT = process.env.PORT || 3001;
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 
@@ -314,6 +319,49 @@ app.post('/api/expenses', async (req, res) => {
     res.json({ success: true, expense: newExpense });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * 12. Upload & Reconcile Bank Statement (CSV)
+ *
+ * Accepts a multipart/form-data POST with a single file field named "statement".
+ * Parses the CSV, cross-references against the DB, updates categories/merchants
+ * where bank narration gives a better signal, and inserts missing transactions.
+ */
+app.post('/api/upload-statement', upload.single('statement'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded. Please attach a CSV bank statement.' });
+    }
+
+    const mimetype = req.file.mimetype || '';
+    const filename = req.file.originalname || '';
+    if (!filename.toLowerCase().endsWith('.csv') && !mimetype.includes('csv') && !mimetype.includes('text')) {
+      return res.status(400).json({ error: 'Only CSV files are supported. Please export your bank statement as CSV.' });
+    }
+
+    const csvContent = req.file.buffer.toString('utf-8');
+
+    // 1. Parse the CSV into normalised transaction rows
+    let statementTransactions;
+    try {
+      statementTransactions = parseStatementCSV(csvContent);
+    } catch (parseErr) {
+      return res.status(422).json({ error: 'Could not parse CSV: ' + parseErr.message });
+    }
+
+    if (statementTransactions.length === 0) {
+      return res.status(422).json({ error: 'No valid debit transactions found in the uploaded statement. Check the file format.' });
+    }
+
+    // 2. Reconcile against the database
+    const report = await reconcileStatementWithDB(statementTransactions);
+
+    res.json({ success: true, ...report });
+  } catch (err) {
+    console.error('Statement upload error:', err);
+    res.status(500).json({ error: 'Statement processing failed: ' + err.message });
   }
 });
 
