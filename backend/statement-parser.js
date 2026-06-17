@@ -4,6 +4,8 @@
  */
 const { parse } = require('csv-parse/sync');
 
+const EMPLOYEE_ID = '00571973';
+
 // ─── Bank Format Detection ────────────────────────────────────────────────────
 
 function detectBankFormat(headers) {
@@ -280,17 +282,18 @@ function parseStatementCSV(csvContent) {
     try {
       const tx = extract(row);
       if (!tx || !tx.date || isNaN(tx.date.getTime())) continue;
-      if (!tx.amount || tx.amount <= 0)                  continue;
-      if (shouldSkip(tx.description))                    continue;
-      // Only include debits (outflows) for expense tracking
-      if (tx.type !== 'debit')                           continue;
+      const isEmployeeSalary = tx.description && tx.description.includes(EMPLOYEE_ID);
+
+      if (!isEmployeeSalary && shouldSkip(tx.description))                    continue;
+      // Only include debits (outflows) for expense tracking, unless it is the employee's salary credit
+      if (tx.type !== 'debit' && !isEmployeeSalary)                           continue;
 
       results.push({
         date:        tx.date,
         amount:      tx.amount,
         currency:    'INR',
         description: tx.description,
-        type:        'debit',
+        type:        isEmployeeSalary ? 'debit' : tx.type,
         bankFormat:  format
       });
     } catch {

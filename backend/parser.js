@@ -2,6 +2,8 @@
  * Regex-based email parser to extract expense information.
  */
 
+const EMPLOYEE_ID = '00571973';
+
 // Helper to match keyword safely, using word boundaries for short keywords (<= 4 chars)
 // to avoid matching inside other words (e.g., 'rent' in 'different', 'ola' in 'chocolate')
 function matchesKeyword(text, keyword) {
@@ -40,7 +42,7 @@ function normalizeMerchant(text, fromEmail = '') {
   if (matchesKeyword(normalizedText, 'ppf') || normalizedText.includes('public provident')) return 'PPF';
   if (matchesKeyword(normalizedText, 'coin')) return 'Coin';
   if (matchesKeyword(normalizedText, 'rent') || normalizedText.includes('landlord')) return 'Rent';
-  if (normalizedText.includes('salary')) return 'Salary Payout';
+  if (normalizedText.includes('salary') || normalizedText.includes(EMPLOYEE_ID)) return 'Salary Payout';
 
   // Try to find a matched rule
   for (const rule of MERCHANT_RULES) {
@@ -82,6 +84,13 @@ function normalizeMerchant(text, fromEmail = '') {
 function getCategoryByContent(subject, snippet, body, merchantName) {
   const fullText = `${subject} ${snippet} ${body}`.toLowerCase();
   const merchantLower = merchantName.toLowerCase();
+
+  // ── Employee ID: highest-confidence salary signal ─────────────────────────
+  // If the user's employee ID appears anywhere in the email, it is definitely
+  // a salary notification from their employer's payroll system.
+  if (fullText.includes(EMPLOYEE_ID)) {
+    return 'Salary';
+  }
 
   // Salary / payroll — expanded keyword set covers Indian bank narrations
   // that may say "payroll", "sal credit", "wages" etc. without "salary"
@@ -329,7 +338,7 @@ function parseEmail(email) {
     !subjectSnippet.includes('cashback') &&
     !subjectSnippet.includes('redemption');
 
-  const isSalary = (isSalaryKeyword && !isPromoSender) || isLargeBankCredit;
+  const isSalary = (isSalaryKeyword && !isPromoSender) || isLargeBankCredit || fullText.includes(EMPLOYEE_ID);
 
   // 4. Skip pure inflow emails (refunds, cashbacks) — but NOT salary / large credits
   //    NOTE: bare "credited" is intentionally removed — it is too broad and blocks salary.
@@ -344,15 +353,15 @@ function parseEmail(email) {
     }
   }
 
-  // Extract merchant — for large bank credits without an explicit salary keyword,
+  // Extract merchant — for large bank credits or employee ID matches without an explicit salary keyword,
   // default to 'Salary Payout' so the dashboard labels it correctly.
-  const merchant = isLargeBankCredit && !isSalaryKeyword
+  const merchant = (isLargeBankCredit || fullText.includes(EMPLOYEE_ID)) && !isSalaryKeyword
     ? 'Salary Payout'
     : normalizeMerchant(subject + ' ' + snippet, from);
 
-  // Extract category — force 'Salary' for large bank credits so they show up
+  // Extract category — force 'Salary' for large bank credits or employee ID matches so they show up
   // in the Salary metric card even when "salary" is absent from the email.
-  const category = isLargeBankCredit && !isSalaryKeyword
+  const category = (isLargeBankCredit || fullText.includes(EMPLOYEE_ID)) && !isSalaryKeyword
     ? 'Salary'
     : getCategoryByContent(subject, snippet, body, merchant);
 
