@@ -83,7 +83,14 @@ function getCategoryByContent(subject, snippet, body, merchantName) {
   const fullText = `${subject} ${snippet} ${body}`.toLowerCase();
   const merchantLower = merchantName.toLowerCase();
 
-  if (fullText.includes('salary') || merchantLower.includes('salary')) {
+  // Salary / payroll — expanded keyword set covers Indian bank narrations
+  // that may say "payroll", "sal credit", "wages" etc. without "salary"
+  const SALARY_CAT_KW = [
+    'salary', 'payroll', 'sal credit', 'salary credit', 'salary paid',
+    'salary deposited', 'salary disbursed', 'salary transfer', 'salary for',
+    'monthly salary', 'wages', 'remuneration', 'pay roll', 'stipend', 'monthly pay'
+  ];
+  if (SALARY_CAT_KW.some(kw => fullText.includes(kw) || merchantLower.includes(kw))) {
     return 'Salary';
   }
 
@@ -277,29 +284,58 @@ function parseEmail(email) {
     return null;
   }
 
-  // 2. Ignore credits, refunds, card payments received, mutual fund redemptions (inflows/transfers)
-  // EXCEPT if it is a salary transaction
-  const isSalary = fullText.includes('salary');
+  // 2. Extract amount early — required for the large-credit salary heuristic below
+  const amountDetails = extractAmountAndCurrency(subject, snippet, body);
+  if (!amountDetails) {
+    return null; // Skip if no amount is found
+  }
+
+  // 3. Salary / payroll detection — expanded to catch Indian bank NEFT narrations
+  //    that don't contain the word "salary" (e.g. "Account Credited via NEFT")
+  const SALARY_KW = [
+    'salary', 'payroll', 'sal credit', 'salary credit', 'salary paid',
+    'salary deposited', 'salary disbursed', 'salary transfer', 'salary for',
+    'monthly salary', 'wages', 'remuneration', 'pay roll', 'stipend', 'monthly pay'
+  ];
+  const isSalaryKeyword = SALARY_KW.some(kw => fullText.includes(kw));
+
+  // Heuristic: a large NEFT/IMPS/bank credit (≥ ₹50,000) is almost certainly
+  // a salary or large transfer — keep it even if "salary" never appears in the email.
+  const isLargeBankCredit =
+    amountDetails.currency === 'INR' &&
+    amountDetails.amount >= 50000 &&
+    (subjectSnippet.includes('neft') || subjectSnippet.includes('imps') ||
+     subjectSnippet.includes('credited') || subjectSnippet.includes('credit')) &&
+    !subjectSnippet.includes('refund') &&
+    !subjectSnippet.includes('cashback') &&
+    !subjectSnippet.includes('redemption');
+
+  const isSalary = isSalaryKeyword || isLargeBankCredit;
+
+  // 4. Skip pure inflow emails (refunds, cashbacks) — but NOT salary / large credits
+  //    NOTE: bare "credited" is intentionally removed — it is too broad and blocks salary.
   if (!isSalary) {
     const inflowKeywords = [
-      'payment received', 'refund', 'credited', 'redemption', 'cashback received', 'money received', 'auto-credited', 'reversal', 'received payment'
+      'payment received', 'refund', 'redemption', 'cashback received',
+      'money received', 'auto-credited', 'reversal', 'received payment',
+      'refund credited', 'cashback credited', 'interest credited'
     ];
     if (inflowKeywords.some(kw => subjectSnippet.includes(kw))) {
       return null;
     }
   }
 
-  // Extract amount and currency
-  const amountDetails = extractAmountAndCurrency(subject, snippet, body);
-  if (!amountDetails) {
-    return null; // Skip if no amount is found
-  }
+  // Extract merchant — for large bank credits without an explicit salary keyword,
+  // default to 'Salary Payout' so the dashboard labels it correctly.
+  const merchant = isLargeBankCredit && !isSalaryKeyword
+    ? 'Salary Payout'
+    : normalizeMerchant(subject + ' ' + snippet, from);
 
-  // Extract merchant
-  const merchant = normalizeMerchant(subject + ' ' + snippet, from);
-  
-  // Extract category (using full subject and body context)
-  const category = getCategoryByContent(subject, snippet, body, merchant);
+  // Extract category — force 'Salary' for large bank credits so they show up
+  // in the Salary metric card even when "salary" is absent from the email.
+  const category = isLargeBankCredit && !isSalaryKeyword
+    ? 'Salary'
+    : getCategoryByContent(subject, snippet, body, merchant);
 
   // Format date
   let parsedDate;

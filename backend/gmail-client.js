@@ -222,8 +222,11 @@ async function fetchTransactionEmails(query = '', maxResults = 500) {
 
   const gmail = google.gmail({ version: 'v1', auth });
   
-  // Default query targeting standard receipt keywords after Jan 1, 2026
-  const finalQuery = query || 'subject:(receipt OR order OR payment OR transaction OR invoice OR bill OR spent OR debited OR confirmed OR salary) after:2026/01/01';
+  // Default query targeting standard receipt keywords + salary/credit notifications
+  // "credited" and "payroll" are added so bank salary emails (e.g. "Account Credited via NEFT")
+  // are fetched even when they don't contain the word "salary".
+  // Date set to 2026/03/01 — user's salary starts from March 2026.
+  const finalQuery = query || 'subject:(receipt OR order OR payment OR transaction OR invoice OR bill OR spent OR debited OR confirmed OR salary OR payroll OR credited OR "neft credit" OR "imps credit") after:2026/03/01';
   
   console.log(`Searching Gmail with query: "${finalQuery}"`);
   
