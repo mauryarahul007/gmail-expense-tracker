@@ -9,42 +9,82 @@ const { parse } = require('csv-parse/sync');
 function detectBankFormat(headers) {
   const h = headers.map(col => col.toLowerCase().trim());
 
-  if (h.includes('narration') && h.includes('debit amount'))               return 'hdfc';
-  if (h.includes('description') && h.some(c => c === 'debit'))             return 'icici';
-  if (h.some(c => c.includes('transaction remarks')))                       return 'axis';
-  if (h.some(c => c.includes('withdrawal amt')))                            return 'kotak';
-  if (h.includes('particulars') || h.includes('narration'))                 return 'sbi';
+  // HDFC real export headers: Date, Narration, Value Dt, Withdrawal Amt., Deposit Amt., Closing Balance
+  // Older HDFC may say "Debit Amount" / "Credit Amount" — both are handled.
+  if (h.includes('narration') && (
+    h.includes('debit amount') ||
+    h.some(c => c.includes('withdrawal amt'))
+  ))                                                                         return 'hdfc';
+  if (h.includes('description') && h.some(c => c === 'debit'))              return 'icici';
+  if (h.some(c => c.includes('transaction remarks')))                        return 'axis';
+  if (h.some(c => c.includes('withdrawal amt')) && !h.includes('narration')) return 'kotak';
+  if (h.includes('particulars') || h.includes('narration'))                  return 'sbi';
   return 'generic';
 }
 
 // ─── Date Parsers ─────────────────────────────────────────────────────────────
 
+// Helper: expand a 2-digit year to a 4-digit year (00–49 → 2000s, 50–99 → 1900s)
+function expandYear(yy) {
+  const n = parseInt(yy, 10);
+  return n >= 0 && n <= 49 ? 2000 + n : 1900 + n;
+}
+
 function parseDate(raw) {
   if (!raw) return null;
   const s = raw.trim();
 
-  // DD/MM/YYYY  (HDFC)
-  const slash = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (slash) return new Date(`${slash[3]}-${slash[2].padStart(2,'0')}-${slash[1].padStart(2,'0')}`);
+  // ── 4-digit year formats ─────────────────────────────────────────────────────
 
-  // DD-Mon-YYYY  (ICICI / SBI)
-  const dashMon = s.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/);
-  if (dashMon) return new Date(`${dashMon[1]} ${dashMon[2]} ${dashMon[3]}`);
+  // DD/MM/YYYY  (HDFC legacy, ICICI, most Indian banks)
+  const slash4 = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (slash4) return new Date(`${slash4[3]}-${slash4[2].padStart(2,'0')}-${slash4[1].padStart(2,'0')}`);
 
-  // DD-MM-YYYY  (Axis)
-  const dashNum = s.match(/^(\d{2})-(\d{2})-(\d{4})$/);
-  if (dashNum) return new Date(`${dashNum[3]}-${dashNum[2]}-${dashNum[1]}`);
+  // DD-Mon-YYYY  (ICICI / SBI: "06-Jan-2026")
+  const dashMon4 = s.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/);
+  if (dashMon4) return new Date(`${dashMon4[1]} ${dashMon4[2]} ${dashMon4[3]}`);
+
+  // DD-MM-YYYY  (Axis Bank: "06-01-2026")
+  const dashNum4 = s.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  if (dashNum4) return new Date(`${dashNum4[3]}-${dashNum4[2]}-${dashNum4[1]}`);
 
   // YYYY-MM-DD  (ISO / generic)
   const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (iso) return new Date(s);
 
   // DD.MM.YYYY
-  const dot = s.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
-  if (dot) return new Date(`${dot[3]}-${dot[2]}-${dot[1]}`);
+  const dot4 = s.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+  if (dot4) return new Date(`${dot4[3]}-${dot4[2]}-${dot4[1]}`);
 
-  const fallback = new Date(s);
-  return isNaN(fallback.getTime()) ? null : fallback;
+  // ── 2-digit year formats (HDFC current export: "08/01/26") ───────────────────
+  // CRITICAL: JavaScript's new Date("08/01/26") reads this as MM/DD/YY = August 1
+  // which is why Jan transactions were showing as August. We handle it explicitly.
+
+  // DD/MM/YY  (HDFC current format)
+  const slash2 = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2})$/);
+  if (slash2) {
+    const yyyy = expandYear(slash2[3]);
+    return new Date(`${yyyy}-${slash2[2].padStart(2,'0')}-${slash2[1].padStart(2,'0')}`);
+  }
+
+  // DD-Mon-YY  (e.g. "01-Jan-26")
+  const dashMonYY = s.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{2})$/);
+  if (dashMonYY) {
+    const yyyy = expandYear(dashMonYY[3]);
+    return new Date(`${dashMonYY[1]} ${dashMonYY[2]} ${yyyy}`);
+  }
+
+  // DD-MM-YY  (e.g. "08-01-26")
+  const dashNum2 = s.match(/^(\d{2})-(\d{2})-(\d{2})$/);
+  if (dashNum2) {
+    const yyyy = expandYear(dashNum2[3]);
+    return new Date(`${yyyy}-${dashNum2[2]}-${dashNum2[1]}`);
+  }
+
+  // ── NO generic new Date() fallback ──────────────────────────────────────────
+  // JavaScript's Date constructor is ambiguous: "08/01/26" → August 1 (MM/DD).
+  // Returning null for unrecognised formats is safer than a wrong date.
+  return null;
 }
 
 function cleanAmount(raw) {
@@ -60,8 +100,10 @@ function extractHdfc(row) {
   const keys = Object.keys(row);
   const dateKey   = keys.find(k => k.trim().toLowerCase() === 'date');
   const narrKey   = keys.find(k => k.trim().toLowerCase() === 'narration');
-  const debitKey  = keys.find(k => k.trim().toLowerCase() === 'debit amount');
-  const creditKey = keys.find(k => k.trim().toLowerCase() === 'credit amount');
+  // HDFC current export uses "Withdrawal Amt." / "Deposit Amt."
+  // Older HDFC used "Debit Amount" / "Credit Amount" — both matched below.
+  const debitKey  = keys.find(k => /withdrawal\s*amt|debit\s*amount/i.test(k.trim()));
+  const creditKey = keys.find(k => /deposit\s*amt|credit\s*amount/i.test(k.trim()));
 
   const debit  = cleanAmount(row[debitKey]);
   const credit = cleanAmount(row[creditKey]);

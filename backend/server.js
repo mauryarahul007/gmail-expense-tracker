@@ -365,6 +365,35 @@ app.post('/api/upload-statement', upload.single('statement'), async (req, res) =
   }
 });
 
+/**
+ * 13. Purge Bank Statement Imports by Date Range
+ *
+ * DELETE /api/purge-statement-imports
+ * Body: { before?: ISO date string, after?: ISO date string }
+ *
+ * Deletes all expenses whose id starts with "stmt-" and whose date falls
+ * OUTSIDE the optional before/after range (i.e. were imported with wrong dates).
+ * If no range is given, deletes ALL stmt- records.
+ */
+app.delete('/api/purge-statement-imports', async (req, res) => {
+  try {
+    const { before, after } = req.body || {};
+
+    const filter = { id: /^stmt-/ };
+
+    if (before || after) {
+      filter.date = {};
+      if (after)  filter.date.$lt = new Date(after);   // before the valid start
+      if (before) filter.date.$gt = new Date(before);  // after the valid end
+    }
+
+    const result = await Expense.deleteMany(filter);
+    res.json({ success: true, deletedCount: result.deletedCount });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Start the server
 app.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}`);
